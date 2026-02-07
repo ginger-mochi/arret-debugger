@@ -1,0 +1,4 @@
+arret-sdl
+arret-qt
+build/
+*.log
