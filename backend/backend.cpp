@@ -474,13 +474,13 @@ alignas(rd_DebuggerIf) static char debugger_if_buf[sizeof(rd_DebuggerIf)];
 
 static bool debug_init(void) {
     if (!core_get_proc_address) {
-        fprintf(stderr, "[arret] error: core does not provide get_proc_address\n");
+        fprintf(stderr, "[arret] warning: core does not provide get_proc_address\n");
         return false;
     }
 
     rd_set_debugger_fn = (rd_Set)core_get_proc_address("rd_set_debugger");
     if (!rd_set_debugger_fn) {
-        fprintf(stderr, "[arret] error: core does not provide rd_set_debugger\n");
+        fprintf(stderr, "[arret] warning: core does not provide rd_set_debugger\n");
         return false;
     }
 
@@ -697,12 +697,10 @@ bool ar_load_core(const char *core_path) {
 
     core.retro_init();
 
-    /* Require get_proc_address and rd_set_debugger */
+    /* Try retrodebug init — non-fatal if core doesn't support it */
     if (!debug_init()) {
-        core.retro_deinit();
-        dlclose(core.handle);
-        memset(&core, 0, sizeof(core));
-        return false;
+        fprintf(stderr, "[arret] warning: core has no retrodebug support; "
+                "debug features will be unavailable\n");
     }
 
     core.retro_get_system_info(&sys_info);
