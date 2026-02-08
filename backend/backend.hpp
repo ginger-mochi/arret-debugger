@@ -140,6 +140,23 @@ void    ar_set_input(unsigned id, int16_t value);
 void    ar_set_manual_input(bool on);
 bool    ar_manual_input(void);
 
+/* Input fix layer: override button/analog state for testing */
+void    ar_input_fix(unsigned id, int16_t value);
+void    ar_input_unfix(unsigned id);
+void    ar_input_unfix_all(void);
+bool    ar_input_is_fixed(unsigned id);
+int16_t ar_input_fixed_value(unsigned id);
+
+/* Analog input */
+void    ar_set_analog(unsigned index, unsigned axis, int16_t value);
+void    ar_analog_fix(unsigned index, unsigned axis, int16_t value);
+void    ar_analog_unfix(unsigned index, unsigned axis);
+bool    ar_analog_is_fixed(unsigned index, unsigned axis);
+int16_t ar_analog_fixed_value(unsigned index, unsigned axis);
+
+/* Controller info (reported by core via SET_CONTROLLER_INFO) */
+bool    ar_controller_has_analog(void);
+
 /* ======================================================================== */
 /* Audio (pull model)                                                        */
 /* ======================================================================== */

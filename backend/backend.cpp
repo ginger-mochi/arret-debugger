@@ -96,7 +96,19 @@ static struct retro_system_info sys_info;
 
 /* Input */
 static int16_t input_state_val[16];
+static bool    input_fixed[16]     = {};
+static int16_t input_fixed_val[16] = {};
 static bool input_bitmasks_supported = false;
+
+/* Analog input */
+static int16_t analog_state_val[4] = {};   /* [lx, ly, rx, ry] */
+static bool    analog_fixed[4]     = {};
+static int16_t analog_fixed_val[4] = {};
+
+/* Controller types (from SET_CONTROLLER_INFO, port 0) */
+#define MAX_CONTROLLER_TYPES 16
+static struct { char desc[128]; unsigned id; } controller_types[MAX_CONTROLLER_TYPES];
+static unsigned num_controller_types = 0;
 
 /* Variables */
 static struct {
@@ -271,8 +283,21 @@ static bool core_environment(unsigned cmd, void *data) {
         return true;
     case RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE:
         return false;
-    case RETRO_ENVIRONMENT_SET_CONTROLLER_INFO:
+    case RETRO_ENVIRONMENT_SET_CONTROLLER_INFO: {
+        auto *info = (const struct retro_controller_info *)data;
+        num_controller_types = 0;
+        if (info && info->types) {
+            for (unsigned i = 0; i < info->num_types && num_controller_types < MAX_CONTROLLER_TYPES; i++) {
+                auto &ct = controller_types[num_controller_types];
+                strncpy(ct.desc, info->types[i].desc ? info->types[i].desc : "",
+                        sizeof(ct.desc) - 1);
+                ct.desc[sizeof(ct.desc) - 1] = '\0';
+                ct.id = info->types[i].id;
+                num_controller_types++;
+            }
+        }
         return true;
+    }
     case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS:
         return true;
     case RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME:
@@ -325,18 +350,26 @@ static void core_input_poll(void) {
 
 static int16_t core_input_state(unsigned port, unsigned device,
                                  unsigned index, unsigned id) {
-    (void)index;
     if (port != 0) return 0;
 
     if ((device & 0xFF) == RETRO_DEVICE_JOYPAD) {
         if (id == RETRO_DEVICE_ID_JOYPAD_MASK) {
             int16_t mask = 0;
-            for (int i = 0; i < 16; i++)
-                if (input_state_val[i]) mask |= (1 << i);
+            for (int i = 0; i < 16; i++) {
+                int16_t val = input_fixed[i] ? input_fixed_val[i] : input_state_val[i];
+                if (val) mask |= (1 << i);
+            }
             return mask;
         }
-        if (id < 16) return input_state_val[id];
+        if (id < 16)
+            return input_fixed[id] ? input_fixed_val[id] : input_state_val[id];
     }
+
+    if ((device & 0xFF) == RETRO_DEVICE_ANALOG && index <= 1 && id <= 1) {
+        unsigned ai = index * 2 + id;
+        return analog_fixed[ai] ? analog_fixed_val[ai] : analog_state_val[ai];
+    }
+
     return 0;
 }
 
@@ -648,6 +681,7 @@ bool ar_load_core(const char *core_path) {
         debugger_if_ptr = NULL;
         rd_set_debugger_fn = NULL;
         core_get_proc_address = NULL;
+        num_controller_types = 0;
     }
 
     if (!core_load(core_path)) return false;
@@ -878,6 +912,60 @@ void ar_set_input(unsigned id, int16_t value) {
 
 void ar_set_manual_input(bool on) { g_manual_input = on; }
 bool ar_manual_input(void)        { return g_manual_input; }
+
+/* Input fix layer */
+void ar_input_fix(unsigned id, int16_t value) {
+    if (id < 16) { input_fixed[id] = true; input_fixed_val[id] = value; }
+}
+void ar_input_unfix(unsigned id) {
+    if (id < 16) { input_fixed[id] = false; input_fixed_val[id] = 0; }
+}
+void ar_input_unfix_all(void) {
+    memset(input_fixed, 0, sizeof(input_fixed));
+    memset(input_fixed_val, 0, sizeof(input_fixed_val));
+    memset(analog_fixed, 0, sizeof(analog_fixed));
+    memset(analog_fixed_val, 0, sizeof(analog_fixed_val));
+}
+bool ar_input_is_fixed(unsigned id) {
+    return id < 16 && input_fixed[id];
+}
+int16_t ar_input_fixed_value(unsigned id) {
+    return id < 16 ? input_fixed_val[id] : 0;
+}
+
+/* Analog input */
+void ar_set_analog(unsigned index, unsigned axis, int16_t value) {
+    if (index <= 1 && axis <= 1) analog_state_val[index * 2 + axis] = value;
+}
+void ar_analog_fix(unsigned index, unsigned axis, int16_t value) {
+    if (index <= 1 && axis <= 1) {
+        unsigned ai = index * 2 + axis;
+        analog_fixed[ai] = true;
+        analog_fixed_val[ai] = value;
+    }
+}
+void ar_analog_unfix(unsigned index, unsigned axis) {
+    if (index <= 1 && axis <= 1) {
+        unsigned ai = index * 2 + axis;
+        analog_fixed[ai] = false;
+        analog_fixed_val[ai] = 0;
+    }
+}
+bool ar_analog_is_fixed(unsigned index, unsigned axis) {
+    return index <= 1 && axis <= 1 && analog_fixed[index * 2 + axis];
+}
+int16_t ar_analog_fixed_value(unsigned index, unsigned axis) {
+    return (index <= 1 && axis <= 1) ? analog_fixed_val[index * 2 + axis] : 0;
+}
+
+/* Controller info */
+bool ar_controller_has_analog(void) {
+    for (unsigned i = 0; i < num_controller_types; i++) {
+        if ((controller_types[i].id & RETRO_DEVICE_MASK) == RETRO_DEVICE_ANALOG)
+            return true;
+    }
+    return false;
+}
 
 /* ======================================================================== */
 /* Public API: audio                                                         */

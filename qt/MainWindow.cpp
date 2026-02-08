@@ -6,6 +6,7 @@
 #include "Debugger.h"
 #include "Breakpoints.h"
 #include "TraceLog.h"
+#include "InputTool.h"
 
 #include <QMenuBar>
 #include <QMenu>
@@ -79,6 +80,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_debugger(nullptr)
     , m_breakpoints(nullptr)
     , m_traceLog(nullptr)
+    , m_inputTool(nullptr)
     , m_timer(new QTimer(this))
 {
     setWindowTitle("Arrêt");
@@ -166,6 +168,7 @@ void MainWindow::tick() {
     }
     if (m_breakpoints) m_breakpoints->refresh();
     if (m_traceLog) m_traceLog->refresh();
+    if (m_inputTool) m_inputTool->refresh();
     ar_check_socket_commands();
 
     if (!ar_running())
@@ -296,7 +299,7 @@ void MainWindow::openMemoryViewerAt(rd_Memory const *mem, uint64_t addr) {
         m_memViewer->setAllowedAreas(Qt::NoDockWidgetArea);
     }
     if (firstOpen)
-        placeFloatingWidget(this, m_memViewer, {m_memSearch, m_debugger, m_breakpoints});
+        placeFloatingWidget(this, m_memViewer, {m_memSearch, m_debugger, m_breakpoints, m_traceLog, m_inputTool});
     else {
         m_memViewer->show();
         m_memViewer->raise();
@@ -313,7 +316,7 @@ void MainWindow::openMemorySearch() {
         m_memSearch->setAllowedAreas(Qt::NoDockWidgetArea);
     }
     if (firstOpen)
-        placeFloatingWidget(this, m_memSearch, {m_memViewer, m_debugger, m_breakpoints});
+        placeFloatingWidget(this, m_memSearch, {m_memViewer, m_debugger, m_breakpoints, m_traceLog, m_inputTool});
     else {
         m_memSearch->show();
         m_memSearch->raise();
@@ -328,7 +331,7 @@ void MainWindow::openDebugger() {
         m_debugger->setAllowedAreas(Qt::NoDockWidgetArea);
     }
     if (firstOpen)
-        placeFloatingWidget(this, m_debugger, {m_memViewer, m_memSearch, m_breakpoints});
+        placeFloatingWidget(this, m_debugger, {m_memViewer, m_memSearch, m_breakpoints, m_traceLog, m_inputTool});
     else {
         m_debugger->show();
         m_debugger->raise();
@@ -343,7 +346,7 @@ void MainWindow::openBreakpoints() {
         m_breakpoints->setAllowedAreas(Qt::NoDockWidgetArea);
     }
     if (firstOpen)
-        placeFloatingWidget(this, m_breakpoints, {m_memViewer, m_memSearch, m_debugger});
+        placeFloatingWidget(this, m_breakpoints, {m_memViewer, m_memSearch, m_debugger, m_traceLog, m_inputTool});
     else {
         m_breakpoints->show();
         m_breakpoints->raise();
@@ -358,10 +361,25 @@ void MainWindow::openTraceLog() {
         m_traceLog->setAllowedAreas(Qt::NoDockWidgetArea);
     }
     if (firstOpen)
-        placeFloatingWidget(this, m_traceLog, {m_memViewer, m_memSearch, m_debugger, m_breakpoints});
+        placeFloatingWidget(this, m_traceLog, {m_memViewer, m_memSearch, m_debugger, m_breakpoints, m_inputTool});
     else {
         m_traceLog->show();
         m_traceLog->raise();
+    }
+}
+
+void MainWindow::openInputTool() {
+    bool firstOpen = !m_inputTool;
+    if (firstOpen) {
+        m_inputTool = new InputTool(this);
+        m_inputTool->setFloating(true);
+        m_inputTool->setAllowedAreas(Qt::NoDockWidgetArea);
+    }
+    if (firstOpen)
+        placeFloatingWidget(this, m_inputTool, {m_memViewer, m_memSearch, m_debugger, m_breakpoints, m_traceLog});
+    else {
+        m_inputTool->show();
+        m_inputTool->raise();
     }
 }
 
@@ -503,6 +521,8 @@ void MainWindow::buildMenus() {
                          QKeySequence("Ctrl+B"));
     toolsMenu->addAction("Trace Log", this, &MainWindow::openTraceLog,
                          QKeySequence("Ctrl+L"));
+    toolsMenu->addAction("Input", this, &MainWindow::openInputTool,
+                         QKeySequence("Ctrl+I"));
 
     updateMenuState();
 }

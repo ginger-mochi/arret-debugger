@@ -202,6 +202,10 @@ static int button_id_from_name(const char *name) {
         {"x",      RETRO_DEVICE_ID_JOYPAD_X},
         {"l",      RETRO_DEVICE_ID_JOYPAD_L},
         {"r",      RETRO_DEVICE_ID_JOYPAD_R},
+        {"l2",     RETRO_DEVICE_ID_JOYPAD_L2},
+        {"r2",     RETRO_DEVICE_ID_JOYPAD_R2},
+        {"l3",     RETRO_DEVICE_ID_JOYPAD_L3},
+        {"r3",     RETRO_DEVICE_ID_JOYPAD_R3},
         {NULL, -1}
     };
     for (int i = 0; map[i].name; i++) {
@@ -480,6 +484,7 @@ void ar_process_command(char *line, FILE *out) {
         if (nargs < 3) { json_error_f(out, "usage: input <button> <0|1>"); return; }
         int id = button_id_from_name(arg1);
         if (id < 0) { json_error_f(out, "unknown button: %s", arg1); return; }
+        ar_input_unfix((unsigned)id);
         ar_set_input((unsigned)id, (int16_t)atoi(arg2));
         json_ok_f(out, NULL);
         return;

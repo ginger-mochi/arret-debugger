@@ -431,6 +431,9 @@ typedef void (*rd_Set)(rd_DebuggerIf* const debugger_if);
 
 #define RD_6502_NUM_REGISTERS 6
 
+#define RD_6502_NMI 0
+#define RD_6502_IRQ 1
+
 #define RD_CPU_65816 RD_MAKE_CPU_TYPE(2, 1)
 
 #define RD_65816_A 0

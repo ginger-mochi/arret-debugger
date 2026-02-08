@@ -11,6 +11,7 @@ class MemorySearch;
 class Debugger;
 class Breakpoints;
 class TraceLog;
+class InputTool;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -43,6 +44,7 @@ private slots:
     void openDebugger();
     void openBreakpoints();
     void openTraceLog();
+    void openInputTool();
 
 private:
     void buildMenus();
@@ -56,6 +58,7 @@ private:
     Debugger     *m_debugger;
     Breakpoints  *m_breakpoints;
     TraceLog     *m_traceLog;
+    InputTool    *m_inputTool;
     QTimer       *m_timer;
     bool          m_paused = false;
     bool          m_stepping = false;
