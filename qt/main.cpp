@@ -4,6 +4,8 @@
 
 #include <QApplication>
 #include <QMessageBox>
+#include <QIcon>
+#include <QPixmap>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -12,6 +14,7 @@
 
 #include "backend.hpp"
 #include "symbols.hpp"
+#include "assets.hpp"
 
 /* Frontend callbacks for Qt */
 
@@ -132,6 +135,11 @@ int main(int argc, char **argv) {
 
     QApplication app(argc, argv);
 
+    /* Set application icon from embedded PNG */
+    QPixmap iconPix;
+    iconPix.loadFromData(ar_asset_icon_png, ar_asset_icon_png_size, "PNG");
+    app.setWindowIcon(QIcon(iconPix));
+
     /* Parse remaining args */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--headless") == 0) {
@@ -173,6 +181,10 @@ int main(int argc, char **argv) {
                 QString("Failed to load core: %1").arg(core_path));
             return 1;
         }
+        if (!ar_has_debug())
+            QMessageBox::warning(nullptr, "No Debug Support",
+                "This core does not support retrodebug.\n"
+                "Debug features will be unavailable.");
         if (rom_path) {
             if (!ar_load_content(rom_path)) {
                 QMessageBox::critical(nullptr, "Error",

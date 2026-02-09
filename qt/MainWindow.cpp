@@ -186,6 +186,11 @@ void MainWindow::loadCore() {
         return;
     }
 
+    if (!ar_has_debug())
+        QMessageBox::warning(this, "No Debug Support",
+            "This core does not support retrodebug.\n"
+            "Debug features will be unavailable.");
+
     updateMenuState();
     setWindowTitle(QString("Arrêt - %1").arg(ar_sys_info()->library_name));
 }

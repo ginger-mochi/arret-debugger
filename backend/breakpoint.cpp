@@ -9,6 +9,7 @@
 #include <map>
 #include <set>
 #include <unordered_map>
+#include <vector>
 #include <string>
 #include <string.h>
 #include <stdio.h>
@@ -25,6 +26,9 @@ static std::unordered_map<rd_SubscriptionID, int> g_sub_to_bp;
 
 /* BP IDs whose subscriptions failed during the last sync */
 static std::set<int> g_sub_failed;
+
+/* BP IDs to delete after the current frame finishes (deferred from handler) */
+static std::vector<int> g_deferred_deletes;
 
 /* Find a CPU by its id string; returns primary CPU if id is NULL or empty */
 static rd_Cpu const *find_cpu(const char *id) {
@@ -330,4 +334,16 @@ void ar_bp_auto_load(void) {
     if (!f) return;
     fclose(f);
     ar_bp_load(path.c_str());
+}
+
+void ar_bp_defer_delete(int id) {
+    g_deferred_deletes.push_back(id);
+}
+
+void ar_bp_flush_deferred(void) {
+    if (g_deferred_deletes.empty()) return;
+    auto pending = std::move(g_deferred_deletes);
+    g_deferred_deletes.clear();
+    for (int id : pending)
+        ar_bp_delete(id);
 }

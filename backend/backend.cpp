@@ -410,8 +410,15 @@ static bool debug_handle_event(void *user_data, rd_SubscriptionID sub_id,
         if (sub_id == tsub) return false;
     }
 
-    /* Trace logging (never halts) */
+    /* Trace logging (never halts).  Suppress at skip addresses to avoid
+       double-logging the instruction where the previous step halted. */
     if (ar_trace_is_sub(sub_id)) {
+        if (event->type == RD_EVENT_EXECUTION) {
+            rd_Cpu const *event_cpu = event->execution.cpu;
+            auto it = g_skip_addr.find(event_cpu);
+            if (it != g_skip_addr.end() && cpu_get_pc(event_cpu) == it->second)
+                return false;
+        }
         ar_trace_on_event(sub_id, event);
         return false;
     }
@@ -444,11 +451,15 @@ static bool debug_handle_event(void *user_data, rd_SubscriptionID sub_id,
                     (event->memory.operation & RD_MEMORY_WRITE) ? "write" : "read",
                     event->can_halt ? "core halted" : "thread blocked");
 
-        /* Auto-delete temporary breakpoints after hit */
+        /* Defer auto-delete of temporary breakpoints until after the
+           frame completes.  Deleting inside the handler triggers
+           sync_subscriptions() → rd_unsubscribe() → rd_recompute_sub_state()
+           which can switch the core from debug mode to normal mode mid-frame,
+           causing it to ignore the halt flag. */
         if (bp_id >= 0) {
             const ar_breakpoint *bp = ar_bp_get(bp_id);
             if (bp && bp->temporary)
-                ar_bp_delete(bp_id);
+                ar_bp_defer_delete(bp_id);
         }
     }
 

@@ -468,6 +468,7 @@ void ar_process_command(char *line, FILE *out) {
                     fcb->delay_ms(fcb->user, frame_ms - elapsed);
             }
         }
+        ar_bp_flush_deferred();
         int bp = ar_bp_hit();
         if (bp >= 0) {
             ar_bp_ack_hit();
@@ -475,6 +476,74 @@ void ar_process_command(char *line, FILE *out) {
                      actual, bp, was_blocked ? ",\"blocked\":true" : "");
         } else {
             json_ok_f(out, "\"frames\":%d", actual);
+        }
+        return;
+    }
+
+    /* --- s / so / sout (step in / step over / step out) --- */
+    if (strcmp(cmd, "s") == 0 || strcmp(cmd, "so") == 0 ||
+        strcmp(cmd, "sout") == 0) {
+        if (!ar_has_debug()) { json_error_f(out, "no debug support"); return; }
+        if (!ar_content_loaded()) { json_error_f(out, "no content loaded"); return; }
+
+        int type;
+        if (strcmp(cmd, "so") == 0)        type = AR_STEP_OVER;
+        else if (strcmp(cmd, "sout") == 0)  type = AR_STEP_OUT;
+        else                                type = AR_STEP_IN;
+
+        ar_core_thread_start();
+
+        /* Resume from blocked state if needed */
+        bool was_blocked = ar_core_blocked();
+        if (was_blocked) {
+            ar_debug_set_skip();
+            ar_bp_ack_hit();
+            ar_core_resume_blocked();
+            while (ar_core_state() != 0 && ar_core_state() != 3)
+                usleep(100);
+            if (ar_core_state() == 3)
+                ar_core_ack_done();
+        }
+
+        if (!ar_debug_step_begin(type)) {
+            json_error_f(out, "step subscribe failed");
+            return;
+        }
+
+        /* Run frames until step completes or breakpoint hits */
+        int frames = 0;
+        for (int i = 0; i < 10000; i++) {
+            if (!ar_run_frame_async()) {
+                usleep(1000);
+                i--;
+                continue;
+            }
+
+            while (true) {
+                int state = ar_core_state();
+                if (state == 3 /* DONE */) {
+                    ar_core_ack_done();
+                    break;
+                }
+                if (state == 2 /* BLOCKED */) break;
+                usleep(100);
+            }
+            frames++;
+
+            if (ar_debug_step_complete()) break;
+            if (ar_bp_hit() >= 0) break;
+            if (ar_core_blocked()) break;
+        }
+
+        ar_debug_step_end();
+        ar_bp_flush_deferred();
+
+        int bp = ar_bp_hit();
+        if (bp >= 0) {
+            ar_bp_ack_hit();
+            json_ok_f(out, "\"frames\":%d,\"breakpoint\":%d", frames, bp);
+        } else {
+            json_ok_f(out, "\"frames\":%d", frames);
         }
         return;
     }

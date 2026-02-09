@@ -26,13 +26,13 @@ Options:
   --mute              Start with audio disabled
   --system-dir DIR    System/BIOS directory (default: .)
   --scale N           Window scale factor (default: 3)
-  --port N            TCP command port (default: 2783)
+  --port N            TCP command port (default: 2783 qt, 2784 sdl)
   --cmd "command"     Send command to running instance and exit
 ```
 
 ## TCP Socket Interface
 
-Arrêt Debugger always listens on a TCP port (default 2783) for commands. This allows
+Arrêt Debugger always listens on a TCP port (default 2783 for qt, 2784 for sdl) for commands. This allows
 external processes to send commands one at a time. This is useful for a gdb-like interface,
 or to allow agents to automate debugging and reversing tasks.
 

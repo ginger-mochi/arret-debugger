@@ -58,6 +58,10 @@ void     ar_bp_auto_load(void);
 int      ar_bp_hit(void);
 void     ar_bp_ack_hit(void);
 
+/* Deferred temp-breakpoint deletion (safe to call from event handler) */
+void     ar_bp_defer_delete(int id);
+void     ar_bp_flush_deferred(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -34,6 +34,9 @@ All responses are single-line JSON. Errors return `{"ok":false,"error":"message"
 | `bp clear` | Delete all breakpoints | `{"ok":true}` |
 | `bp save [path]` | Save breakpoints to file (default: `<rom>.bp`) | `{"ok":true,"path":"..."}` |
 | `bp load [path]` | Load breakpoints from file (default: `<rom>.bp`) | `{"ok":true,"path":"...","count":N}` |
+| `s` | Single-step one instruction (step into). Auto-resumes from blocked state. | `{"ok":true,"frames":N}` |
+| `so` | Step over (execute one instruction, stepping over JSR/calls) | `{"ok":true,"frames":N}` |
+| `sout` | Step out (run until current subroutine returns) | `{"ok":true,"frames":N}` |
 | `trace on [path]` | Start execution trace (optionally to file) | `{"ok":true,"tracing":true}` |
 | `trace off` | Stop execution trace | `{"ok":true,"tracing":false,"lines":N}` |
 | `trace status` | Query trace state | `{"ok":true,"tracing":...,"lines":N,...}` |

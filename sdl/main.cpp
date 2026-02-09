@@ -13,8 +13,11 @@
 
 #include <SDL.h>
 
+#include "stb_image.h"
+
 #include "backend.hpp"
 #include "symbols.hpp"
+#include "assets.hpp"
 
 /* ========================================================================
  * SDL globals
@@ -48,6 +51,22 @@ static bool sdl_video_init(void) {
     if (!sdl_window) {
         fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
         return false;
+    }
+
+    /* Set window icon from embedded PNG */
+    {
+        int iw, ih;
+        unsigned char *px = stbi_load_from_memory(ar_asset_icon_png, ar_asset_icon_png_size,
+                                                   &iw, &ih, NULL, 4);
+        if (px) {
+            SDL_Surface *icon = SDL_CreateRGBSurfaceFrom(px, iw, ih, 32, iw * 4,
+                0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
+            if (icon) {
+                SDL_SetWindowIcon(sdl_window, icon);
+                SDL_FreeSurface(icon);
+            }
+            stbi_image_free(px);
+        }
     }
 
     sdl_renderer = SDL_CreateRenderer(sdl_window, -1,
@@ -370,7 +389,7 @@ static void usage(const char *prog) {
         "  --mute              Start with audio disabled\n"
         "  --system-dir DIR    System/BIOS directory (default: .)\n"
         "  --scale N           Window scale factor (default: 3)\n"
-        "  --port N            TCP command port (default: 2783)\n"
+        "  --port N            TCP command port (default: 2784)\n"
         "  --cmd \"command\"     Send command to running instance and exit\n"
         "\n", prog, prog);
 }
@@ -384,7 +403,7 @@ int main(int argc, char **argv) {
     const char *rom_path  = NULL;
     const char *cmd_str   = NULL;
     bool mute_flag = false;
-    int port = 2783;
+    int port = 2784;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--headless") == 0) {

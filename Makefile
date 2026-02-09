@@ -1,7 +1,7 @@
-CXX     ?= g++
-CXXFLAGS := -Wall -Wextra -O2 -g -Iinclude -Ibackend -std=c++20
-LDFLAGS := -ldl -lm
+CXX      ?= g++
 BUILDDIR := build
+CXXFLAGS := -Wall -Wextra -O2 -g -Iinclude -Ibackend -I$(BUILDDIR) -std=c++20
+LDFLAGS  := -ldl -lm
 
 BACKEND_SRCS := $(wildcard backend/*.cpp backend/**/*.cpp)
 HEADERS      := $(wildcard include/*.h) $(wildcard backend/*.hpp)
@@ -14,12 +14,50 @@ $(BUILDDIR)/$(subst /,_,$(patsubst backend/%.cpp,%,$(1))).o
 endef
 BACKEND_OBJS := $(foreach s,$(BACKEND_SRCS),$(call backend_obj,$(s)))
 
+ASSET_FILES  := $(wildcard assets/*)
+BACKEND_OBJS += $(BUILDDIR)/assets.o
+
 .PHONY: all clean sdl qt
 
 all: sdl
 
 sdl: arret-sdl
 qt:  arret-qt
+
+# ========== Assets (auto-generated from assets/) ==========
+
+$(BUILDDIR)/assets.hpp: $(ASSET_FILES) Makefile | $(BUILDDIR)
+	@printf '/* Generated from assets/ -- do not edit */\n#pragma once\n\nextern "C" {\n' > $@
+	@for f in $(ASSET_FILES); do \
+		sym=ar_asset_$$(basename "$$f" | tr '.-' '__'); \
+		printf 'extern const unsigned char %s[];\n' "$$sym" >> $@; \
+		printf 'extern const unsigned int  %s_size;\n' "$$sym" >> $@; \
+	done
+	@printf '}\n' >> $@
+
+$(BUILDDIR)/assets.cpp: $(ASSET_FILES) Makefile | $(BUILDDIR)
+	@printf '/* Generated from assets/ -- do not edit */\n' > $@
+	@for f in $(ASSET_FILES); do \
+		sym=ar_asset_$$(basename "$$f" | tr '.-' '__'); \
+		printf '__asm__(".section .rodata,\\"a\\",@progbits\\n"\n' >> $@; \
+		printf '    ".global %s\\n"\n' "$$sym" >> $@; \
+		printf '    ".global %s_size\\n"\n' "$$sym" >> $@; \
+		printf '    ".balign 16\\n"\n' >> $@; \
+		printf '    "%s:\\n"\n' "$$sym" >> $@; \
+		printf '    "  .incbin \\"%s\\"\\n"\n' "$$f" >> $@; \
+		printf '    "%s_end:\\n"\n' "$$sym" >> $@; \
+		printf '    ".balign 4\\n"\n' >> $@; \
+		printf '    "%s_size:\\n"\n' "$$sym" >> $@; \
+		printf '    "  .int %s_end - %s\\n"\n' "$$sym" "$$sym" >> $@; \
+		printf '    ".previous\\n");\n\n' >> $@; \
+	done
+
+$(BUILDDIR)/assets.o: $(BUILDDIR)/assets.cpp | $(BUILDDIR)
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+# Frontend objects that include assets.hpp
+$(BUILDDIR)/sdl_main.o: $(BUILDDIR)/assets.hpp
+$(BUILDDIR)/qt_main.o: $(BUILDDIR)/assets.hpp
 
 # ========== Backend (shared) ==========
 
