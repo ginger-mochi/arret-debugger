@@ -14,6 +14,9 @@
 #include <QKeySequence>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QDialog>
+#include <QTextEdit>
+#include <QVBoxLayout>
 #include <QScreen>
 #include <QRandomGenerator>
 
@@ -388,6 +391,49 @@ void MainWindow::openInputTool() {
     }
 }
 
+void MainWindow::openContentInfo() {
+    if (!ar_has_debug() || !ar_content_loaded()) {
+        QMessageBox::information(this, "Content Info", "No content loaded.");
+        return;
+    }
+    rd_System const *sys = ar_debug_system();
+    if (!sys || !sys->v1.get_content_info) {
+        QMessageBox::information(this, "Content Info",
+                                 "Core does not provide content info.");
+        return;
+    }
+
+    int len = sys->v1.get_content_info(NULL, 0);
+    QString text;
+    if (len > 0) {
+        QByteArray buf(len + 1, '\0');
+        sys->v1.get_content_info(buf.data(), len + 1);
+        buf[len] = '\0';
+        text = QString("system: %1\n\n%2")
+                   .arg(sys->v1.description)
+                   .arg(QString::fromUtf8(buf.data()));
+    } else {
+        text = QString("system: %1\n\n(no content info)")
+                   .arg(sys->v1.description);
+    }
+
+    auto *dlg = new QDialog(this);
+    dlg->setWindowTitle("Content Info");
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    dlg->resize(300, 304);
+
+    auto *edit = new QTextEdit(dlg);
+    edit->setReadOnly(true);
+    edit->setFont(QFont("monospace"));
+    edit->setPlainText(text);
+
+    auto *layout = new QVBoxLayout(dlg);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(edit);
+
+    dlg->show();
+}
+
 void MainWindow::debugStep(int type) {
     if (!ar_has_debug() || !ar_content_loaded()) return;
     if (!m_paused) {
@@ -528,6 +574,8 @@ void MainWindow::buildMenus() {
                          QKeySequence("Ctrl+L"));
     toolsMenu->addAction("Input", this, &MainWindow::openInputTool,
                          QKeySequence("Ctrl+I"));
+    toolsMenu->addAction("Content Info", this, &MainWindow::openContentInfo,
+                         QKeySequence("Ctrl+Shift+I"));
 
     updateMenuState();
 }

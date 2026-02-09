@@ -8,6 +8,7 @@ All responses are single-line JSON. Errors return `{"ok":false,"error":"message"
 | Command | Description | Response |
 |---------|-------------|----------|
 | `info` | Core name, resolution, debug capabilities | `{"ok":true,"core":"SameBoy","width":160,...}` |
+| `content` | Content info (mapper, title, checksums, etc.) | `{"ok":true,"info":"Title: ...\\nMapper: ..."}` |
 | `run [N]` | Run N frames (default 1, max 10000). Returns `"breakpoint":ID` if a breakpoint/watchpoint hit, plus `"blocked":true` if the core thread is blocked mid-frame (save/load unavailable). Auto-resumes from a previous blocked state. | `{"ok":true,"frames":N}` |
 | `input <button> <0\|1>` | Press (1) or release (0) a button | `{"ok":true}` |
 | `peek <addr> [len]` | Read bytes from memory (retrodebug) | `{"ok":true,"addr":"0x1234","data":[...]}` |

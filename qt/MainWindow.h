@@ -45,6 +45,7 @@ private slots:
     void openBreakpoints();
     void openTraceLog();
     void openInputTool();
+    void openContentInfo();
 
 private:
     void buildMenus();

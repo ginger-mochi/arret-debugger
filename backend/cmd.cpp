@@ -398,6 +398,36 @@ void ar_process_command(char *line, FILE *out) {
         return;
     }
 
+    /* --- content --- */
+    if (strcmp(cmd, "content") == 0) {
+        if (!ar_has_debug()) { json_error_f(out, "no debug support"); return; }
+        if (!ar_content_loaded()) { json_error_f(out, "no content loaded"); return; }
+        rd_System const *sys = ar_debug_system();
+        if (!sys || !sys->v1.get_content_info) {
+            json_error_f(out, "core does not support content info");
+            return;
+        }
+        int len = sys->v1.get_content_info(NULL, 0);
+        if (len <= 0) {
+            json_error_f(out, "no content info available");
+            return;
+        }
+        char *buf = (char *)malloc(len + 1);
+        sys->v1.get_content_info(buf, len + 1);
+        /* Escape the string for JSON (newlines → \n, quotes, backslashes) */
+        fprintf(out, "{\"ok\":true,\"info\":\"");
+        for (int i = 0; buf[i]; i++) {
+            if (buf[i] == '\n') fprintf(out, "\\n");
+            else if (buf[i] == '"') fprintf(out, "\\\"");
+            else if (buf[i] == '\\') fprintf(out, "\\\\");
+            else fputc(buf[i], out);
+        }
+        fprintf(out, "\"}\n");
+        fflush(out);
+        free(buf);
+        return;
+    }
+
     /* --- run [N] --- */
     if (strcmp(cmd, "run") == 0) {
         int n = 1;

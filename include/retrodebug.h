@@ -1,6 +1,8 @@
 /*
  * retrodebug.h
  * based on hcdebug.h by leiradel
+ *
+ * Everything starts at rd_DebuggerIf, so please see that struct first.
 */
 
 #ifndef RETRO_DEBUG__
@@ -152,7 +154,7 @@ rd_Cpu;
 
 typedef struct rd_System {
     struct {
-        /* System info */
+        /* Common system name, lower case -- e.g. "nes", "gb", "gbc", "megadrive". Allows the front-end to identify the system type, so if there are other cores that implement the same system, follow their lead. */
         char const* description;
 
         /* CPUs available in the system */
@@ -166,6 +168,12 @@ typedef struct rd_System {
         /* Supported breakpoints not covered by specific functions */
         rd_MiscBreakpoint const* const* break_points;
         unsigned num_break_points;
+
+        /* Write human-readable info about the loaded content (cartridge header,
+           mapper, game title, checksum, etc.) into outbuff.  Works like snprintf:
+           outbuff may be NULL and outsize may be 0; returns the number of chars
+           that would be written for the complete output. */
+        int (*get_content_info)(char* outbuff, int outsize);
     }
     v1;
 }
@@ -324,8 +332,6 @@ rd_Subscription;
  * Debug interface. Shared between the core and frontend.
  * Members which are const are initialized by the frontend.
  *
- * Initialization contract
- * -----------------------
  * The frontend allocates rd_DebuggerIf, fills in the const fields
  * (frontend_api_version, user_data, handle_event), and passes it to
  * rd_set_debugger().
@@ -343,7 +349,7 @@ rd_Subscription;
  *
  * The frontend must not cache or act on system topology (region lists,
  * sizes, memory map entries) until after retro_load_game() has returned
- * successfully.
+ * successfully. For cores that do not load content, initialization should be immediate.
  */
 typedef struct rd_DebuggerIf {
     unsigned const frontend_api_version;
