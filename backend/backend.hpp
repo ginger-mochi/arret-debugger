@@ -188,6 +188,14 @@ void ar_process_command(char *line, FILE *resp_out);
 bool ar_save_state(int slot);
 bool ar_load_state(int slot);
 
+/*
+ * Serialize the current core state into a caller-provided buffer.
+ * On success, writes the serialized data to *buf and its size to *size.
+ * The caller must free(*buf) when done.
+ * Returns false if serialization is unavailable or fails.
+ */
+bool ar_serialize(void **buf, size_t *size);
+
 /* ======================================================================== */
 /* Debug                                                                     */
 /* ======================================================================== */

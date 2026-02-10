@@ -16,6 +16,7 @@
 #include "stb_image.h"
 
 #include "backend.hpp"
+#include "breakpoint.hpp"
 #include "symbols.hpp"
 #include "assets.hpp"
 
@@ -369,6 +370,7 @@ static void run_headed(void) {
         sdl_handle_events();
         ar_check_socket_commands();
         ar_run_frame();
+        ar_bp_flush_deferred();
         sdl_render();
     }
 

@@ -443,11 +443,21 @@ void ar_process_command(char *line, FILE *out) {
         if (ar_core_blocked()) {
             ar_debug_set_skip();
             ar_bp_ack_hit();
+            ar_bp_flush_deferred();
             ar_core_resume_blocked();
-            /* Wait for the interrupted frame to finish */
-            while (ar_core_state() != 0 /* IDLE */ &&
-                   ar_core_state() != 3 /* DONE */)
+            /* Wait for the interrupted frame to finish.  Another breakpoint
+               may fire during the remainder of the frame (re-BLOCKED). */
+            while (true) {
+                int st = ar_core_state();
+                if (st == 0 /* IDLE */ || st == 3 /* DONE */) break;
+                if (st == 2 /* BLOCKED */) {
+                    ar_bp_ack_hit();
+                    ar_bp_flush_deferred();
+                    ar_debug_set_skip();
+                    ar_core_resume_blocked();
+                }
                 usleep(100);
+            }
             if (ar_core_state() == 3)
                 ar_core_ack_done();
         }
@@ -528,9 +538,21 @@ void ar_process_command(char *line, FILE *out) {
         if (was_blocked) {
             ar_debug_set_skip();
             ar_bp_ack_hit();
+            ar_bp_flush_deferred();
             ar_core_resume_blocked();
-            while (ar_core_state() != 0 && ar_core_state() != 3)
+            /* Wait for the interrupted frame to finish.  Another breakpoint
+               may fire during the remainder of the frame (re-BLOCKED). */
+            while (true) {
+                int st = ar_core_state();
+                if (st == 0 /* IDLE */ || st == 3 /* DONE */) break;
+                if (st == 2 /* BLOCKED */) {
+                    ar_bp_ack_hit();
+                    ar_bp_flush_deferred();
+                    ar_debug_set_skip();
+                    ar_core_resume_blocked();
+                }
                 usleep(100);
+            }
             if (ar_core_state() == 3)
                 ar_core_ack_done();
         }
@@ -759,6 +781,49 @@ void ar_process_command(char *line, FILE *out) {
             json_ok_f(out, "\"slot\":%d", slot);
         else
             json_error_f(out, "load failed for slot %d", slot);
+        return;
+    }
+
+    /* --- statehash --- */
+    if (strcmp(cmd, "statehash") == 0) {
+        if (!ar_content_loaded()) {
+            json_error_f(out, "no content loaded");
+            return;
+        }
+        if (ar_core_blocked()) {
+            json_error_f(out, "cannot serialize while core thread is blocked");
+            return;
+        }
+        void *buf = NULL;
+        size_t sz = 0;
+        if (!ar_serialize(&buf, &sz)) {
+            json_error_f(out, "serialization failed");
+            return;
+        }
+        /* CRC32 (ISO 3309 polynomial) */
+        static const uint32_t crc_table[256] = {
+            #define CRC_ENTRY(i) ( \
+                ((i) & 1 ? 0xEDB88320u : 0) ^ ((i) >> 1 & 1 ? 0x76DC4190u : 0) ^ \
+                ((i) >> 2 & 1 ? 0x3B6E20C8u : 0) ^ ((i) >> 3 & 1 ? 0x1DB71064u : 0) ^ \
+                ((i) >> 4 & 1 ? 0x0EDB8832u : 0) ^ ((i) >> 5 & 1 ? 0x076DC419u : 0) ^ \
+                ((i) >> 6 & 1 ? 0x03B6E20Cu : 0) ^ ((i) >> 7 & 1 ? 0x01DB7106u : 0))
+            #define CRC16(i) CRC_ENTRY((i)+0),CRC_ENTRY((i)+1),CRC_ENTRY((i)+2),CRC_ENTRY((i)+3), \
+                             CRC_ENTRY((i)+4),CRC_ENTRY((i)+5),CRC_ENTRY((i)+6),CRC_ENTRY((i)+7), \
+                             CRC_ENTRY((i)+8),CRC_ENTRY((i)+9),CRC_ENTRY((i)+10),CRC_ENTRY((i)+11), \
+                             CRC_ENTRY((i)+12),CRC_ENTRY((i)+13),CRC_ENTRY((i)+14),CRC_ENTRY((i)+15)
+            CRC16(0),CRC16(16),CRC16(32),CRC16(48),CRC16(64),CRC16(80),CRC16(96),CRC16(112),
+            CRC16(128),CRC16(144),CRC16(160),CRC16(176),CRC16(192),CRC16(208),CRC16(224),CRC16(240)
+            #undef CRC16
+            #undef CRC_ENTRY
+        };
+        uint32_t crc = 0xFFFFFFFFu;
+        const uint8_t *p = (const uint8_t *)buf;
+        for (size_t i = 0; i < sz; i++)
+            crc = crc_table[(crc ^ p[i]) & 0xFF] ^ (crc >> 8);
+        crc ^= 0xFFFFFFFFu;
+        free(buf);
+        json_ok_f(out, "\"hash\":\"%08X\",\"size\":%lu",
+                  (unsigned)crc, (unsigned long)sz);
         return;
     }
 

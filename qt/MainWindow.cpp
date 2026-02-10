@@ -21,6 +21,7 @@
 #include <QRandomGenerator>
 
 #include "backend.hpp"
+#include "breakpoint.hpp"
 #include "symbols.hpp"
 
 /* Position a newly-created floating widget so it doesn't overlap existing
@@ -100,7 +101,7 @@ MainWindow::~MainWindow() {
     m_audio->stop();
 }
 
-void MainWindow::startEmulation() {
+void MainWindow::startEmulation(bool headless) {
     /* If content is loaded, use its fps; otherwise use a default tick rate */
     int interval = 16;
     if (ar_content_loaded()) {
@@ -116,6 +117,12 @@ void MainWindow::startEmulation() {
         ar_core_thread_start();
     }
 
+    /* Headless mode starts paused so TCP `run` commands drive the core */
+    if (headless) {
+        m_paused = true;
+        m_pauseAction->setText("Resume");
+    }
+
     m_timer->start(interval);
 }
 
@@ -124,12 +131,25 @@ void MainWindow::tick() {
 
     if (state == 2 /* BLOCKED */) {
         if (m_debugger) m_debugger->setThreadBlocked(true);
+        if (m_stepping && ar_debug_step_complete()) {
+            ar_debug_step_end();
+            m_stepping = false;
+            m_paused = true;
+            m_pauseAction->setText("Resume");
+        }
         if (ar_bp_hit() >= 0) {
             ar_bp_ack_hit();
+            m_paused = true;
             m_bpPaused = true;
+            m_pauseAction->setText("Resume");
+            if (m_stepping) {
+                ar_debug_step_end();
+                m_stepping = false;
+            }
             if (!m_debugger || !m_debugger->isVisible())
                 openDebugger();
         }
+        ar_bp_flush_deferred();
     }
 
     if (state == 3 /* DONE */) {
@@ -144,9 +164,17 @@ void MainWindow::tick() {
             m_paused = true;
             m_bpPaused = true;
             m_pauseAction->setText("Resume");
+            /* A breakpoint may fire before the step subscription (due to
+               subscription ordering in the core).  End the step so the
+               IDLE handler below doesn't auto-run another frame. */
+            if (m_stepping) {
+                ar_debug_step_end();
+                m_stepping = false;
+            }
             if (!m_debugger || !m_debugger->isVisible())
                 openDebugger();
         }
+        ar_bp_flush_deferred();
         if (m_debugger) m_debugger->setThreadBlocked(false);
     }
 
@@ -409,11 +437,11 @@ void MainWindow::openContentInfo() {
         QByteArray buf(len + 1, '\0');
         sys->v1.get_content_info(buf.data(), len + 1);
         buf[len] = '\0';
-        text = QString("system: %1\n\n%2")
+        text = QString("System: %1\n\n%2")
                    .arg(sys->v1.description)
                    .arg(QString::fromUtf8(buf.data()));
     } else {
-        text = QString("system: %1\n\n(no content info)")
+        text = QString("System: %1\n\n(no content info)")
                    .arg(sys->v1.description);
     }
 

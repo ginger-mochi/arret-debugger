@@ -191,9 +191,11 @@ int main(int argc, char **argv) {
                     QString("Failed to load content: %1").arg(rom_path));
                 return 1;
             }
-            ar_bp_set_auto(true);
-            ar_bp_auto_load();
-            ar_sym_auto_load();
+            if (!headless) {
+                ar_bp_set_auto(true);
+                ar_bp_auto_load();
+                ar_sym_auto_load();
+            }
         }
     }
 
@@ -205,7 +207,7 @@ int main(int argc, char **argv) {
     if (!headless)
         win->show();
 
-    win->startEmulation();
+    win->startEmulation(headless);
 
     int ret = app.exec();
 

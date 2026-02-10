@@ -170,9 +170,9 @@ typedef struct rd_System {
         unsigned num_break_points;
 
         /* Write human-readable info about the loaded content (cartridge header,
-           mapper, game title, checksum, etc.) into outbuff.  Works like snprintf:
-           outbuff may be NULL and outsize may be 0; returns the number of chars
-           that would be written for the complete output. */
+           mapper, game title, checksum, etc.) into outbuff.
+           outbuff may be NULL and outsize may be 0.
+           Returns the number of chars that would be written for the complete output. */
         int (*get_content_info)(char* outbuff, int outsize);
     }
     v1;

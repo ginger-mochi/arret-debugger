@@ -19,7 +19,7 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
-    void startEmulation();
+    void startEmulation(bool headless = false);
 
     /* Open the memory viewer (singleton) and navigate to addr in the given region.
        If mem is null, keeps the current region. */

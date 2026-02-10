@@ -593,6 +593,17 @@ bool ar_save_state(int slot) {
     return ok;
 }
 
+bool ar_serialize(void **out_buf, size_t *out_size) {
+    size_t sz = core.retro_serialize_size();
+    if (sz == 0) return false;
+    void *buf = malloc(sz);
+    if (!buf) return false;
+    if (!core.retro_serialize(buf, sz)) { free(buf); return false; }
+    *out_buf = buf;
+    *out_size = sz;
+    return true;
+}
+
 bool ar_load_state(int slot) {
     if (slot < 0 || slot >= MAX_SAVE_SLOTS) return false;
 

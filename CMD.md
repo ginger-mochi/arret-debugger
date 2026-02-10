@@ -18,6 +18,7 @@ All responses are single-line JSON. Errors return `{"ok":false,"error":"message"
 | `reg <name> <value>` | Set a register | `{"ok":true}` |
 | `save <slot>` | Save state to slot 0-9 | `{"ok":true,"slot":N}` |
 | `load <slot>` | Load state from slot 0-9 (doesn't update screen immediately.) | `{"ok":true,"slot":N}` |
+| `statehash` | CRC32 hash of serialized save state (for determinism checks) | `{"ok":true,"hash":"ABCD1234","size":N}` |
 | `screen [path]` | Save frame as PNG (default: `screenshot.png`) | `{"ok":true,"width":160,"height":144,"path":"screenshot.png"}` |
 | `regions` | List all memory regions | `{"ok":true,"regions":[{"id":"...","description":"...","base_address":"0x0","size":65536,"has_mmap":true},...]}` |
 | `dump <id> [start size [path]]` | Hex dump of memory region (to TCP or file) | Text hex dump, or `{"ok":true,"path":"..."}` if file |
@@ -60,12 +61,6 @@ All responses are single-line JSON. Errors return `{"ok":false,"error":"message"
 ## Button Names
 
 `up`, `down`, `left`, `right`, `a`, `b`, `start`, `select`, `x`, `y`, `l`, `r`
-
-## Register Names (LR35902 / Game Boy CPU)
-
-8-bit: `a`, `f`, `b`, `c`, `d`, `e`, `h`, `l`
-16-bit: `sp`, `pc`, `af`, `bc`, `de`, `hl`
-Other: `ime` (interrupt master enable)
 
 ## Address Spec (`<addrspec>`)
 
