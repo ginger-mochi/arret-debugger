@@ -12,6 +12,7 @@ class Debugger;
 class Breakpoints;
 class TraceLog;
 class InputTool;
+class TileViewer;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -46,6 +47,7 @@ private slots:
     void openTraceLog();
     void openInputTool();
     void openContentInfo();
+    void openTileViewer();
 
 private:
     void buildMenus();
@@ -60,6 +62,7 @@ private:
     Breakpoints  *m_breakpoints;
     TraceLog     *m_traceLog;
     InputTool    *m_inputTool;
+    TileViewer   *m_tileViewer;
     QTimer       *m_timer;
     bool          m_paused = false;
     bool          m_stepping = false;
@@ -72,6 +75,7 @@ private:
     QAction      *m_reloadAction;
     QMenu        *m_saveMenu;
     QMenu        *m_loadMenu;
+    QMenu        *m_systemMenu;
 };
 
 #endif // MAINWINDOW_H

@@ -69,6 +69,9 @@ $(BUILDDIR)/%.o: backend/%.cpp $(HEADERS) | $(BUILDDIR)
 $(BUILDDIR)/arch_%.o: backend/arch/%.cpp $(HEADERS) | $(BUILDDIR)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
+$(BUILDDIR)/gb_%.o: backend/gb/%.cpp $(HEADERS) | $(BUILDDIR)
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
 # ========== SDL frontend ==========
 
 SDL_CFLAGS  := $(shell pkg-config --cflags sdl2)
@@ -99,16 +102,30 @@ QT_MOC_SRCS := $(patsubst qt/%.h,$(BUILDDIR)/moc_%.cpp,$(QT_MOC_HDRS))
 QT_MOC_OBJS := $(QT_MOC_SRCS:.cpp=.o)
 QT_OBJS     := $(patsubst qt/%.cpp,$(BUILDDIR)/qt_%.o,$(QT_SRCS))
 
+# Qt subdirectory sources (qt/gb/*.cpp -> build/qt_gb_*.o)
+QT_SUB_SRCS     := $(wildcard qt/*/*.cpp)
+QT_SUB_MOC_HDRS := $(wildcard qt/*/*.h)
+QT_SUB_MOC_SRCS := $(foreach h,$(QT_SUB_MOC_HDRS),$(BUILDDIR)/moc_$(subst /,_,$(patsubst qt/%.h,%,$(h))).cpp)
+QT_SUB_MOC_OBJS := $(QT_SUB_MOC_SRCS:.cpp=.o)
+QT_SUB_OBJS     := $(foreach s,$(QT_SUB_SRCS),$(BUILDDIR)/qt_$(subst /,_,$(patsubst qt/%.cpp,%,$(s))).o)
+
 $(BUILDDIR)/moc_%.cpp: qt/%.h | $(BUILDDIR)
 	$(MOC) $< -o $@
 
 $(BUILDDIR)/moc_%.o: $(BUILDDIR)/moc_%.cpp | $(BUILDDIR)
 	$(CXX) $(QT_CXXFLAGS) -c -o $@ $<
 
-$(BUILDDIR)/qt_%.o: qt/%.cpp $(HEADERS) $(QT_MOC_HDRS) | $(BUILDDIR)
+$(BUILDDIR)/qt_%.o: qt/%.cpp $(HEADERS) $(QT_MOC_HDRS) $(QT_SUB_MOC_HDRS) | $(BUILDDIR)
 	$(CXX) $(QT_CXXFLAGS) -c -o $@ $<
 
-arret-qt: $(BACKEND_OBJS) $(QT_OBJS) $(QT_MOC_OBJS)
+# Qt subdir pattern rules
+$(BUILDDIR)/moc_gb_%.cpp: qt/gb/%.h | $(BUILDDIR)
+	$(MOC) $< -o $@
+
+$(BUILDDIR)/qt_gb_%.o: qt/gb/%.cpp $(HEADERS) $(QT_MOC_HDRS) $(QT_SUB_MOC_HDRS) | $(BUILDDIR)
+	$(CXX) $(QT_CXXFLAGS) -Iqt -c -o $@ $<
+
+arret-qt: $(BACKEND_OBJS) $(QT_OBJS) $(QT_MOC_OBJS) $(QT_SUB_OBJS) $(QT_SUB_MOC_OBJS)
 	$(CXX) -o $@ $^ $(LDFLAGS) $(QT_LIBS)
 
 # ========== Common ==========

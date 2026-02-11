@@ -7,6 +7,7 @@
 #include "Breakpoints.h"
 #include "TraceLog.h"
 #include "InputTool.h"
+#include "gb/TileViewer.h"
 
 #include <QMenuBar>
 #include <QMenu>
@@ -19,6 +20,8 @@
 #include <QVBoxLayout>
 #include <QScreen>
 #include <QRandomGenerator>
+
+#include <cstring>
 
 #include "backend.hpp"
 #include "breakpoint.hpp"
@@ -85,6 +88,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_breakpoints(nullptr)
     , m_traceLog(nullptr)
     , m_inputTool(nullptr)
+    , m_tileViewer(nullptr)
     , m_timer(new QTimer(this))
 {
     setWindowTitle("Arrêt");
@@ -200,6 +204,7 @@ void MainWindow::tick() {
     if (m_breakpoints) m_breakpoints->refresh();
     if (m_traceLog) m_traceLog->refresh();
     if (m_inputTool) m_inputTool->refresh();
+    if (m_tileViewer) m_tileViewer->refresh();
     ar_check_socket_commands();
 
     if (!ar_running())
@@ -419,6 +424,21 @@ void MainWindow::openInputTool() {
     }
 }
 
+void MainWindow::openTileViewer() {
+    bool firstOpen = !m_tileViewer;
+    if (firstOpen) {
+        m_tileViewer = new TileViewer(this);
+        m_tileViewer->setFloating(true);
+        m_tileViewer->setAllowedAreas(Qt::NoDockWidgetArea);
+    }
+    if (firstOpen)
+        placeFloatingWidget(this, m_tileViewer, {m_memViewer, m_memSearch, m_debugger, m_breakpoints, m_traceLog, m_inputTool});
+    else {
+        m_tileViewer->show();
+        m_tileViewer->raise();
+    }
+}
+
 void MainWindow::openContentInfo() {
     if (!ar_has_debug() || !ar_content_loaded()) {
         QMessageBox::information(this, "Content Info", "No content loaded.");
@@ -590,6 +610,11 @@ void MainWindow::buildMenus() {
 
     /* Tools menu */
     auto *toolsMenu = menuBar()->addMenu("&Tools");
+
+    m_systemMenu = toolsMenu->addMenu("System");
+    m_systemMenu->setEnabled(false);
+
+    toolsMenu->addSeparator();
     toolsMenu->addAction("Memory Viewer", this, &MainWindow::openMemoryViewer,
                          QKeySequence("Ctrl+M"));
     toolsMenu->addAction("Memory Search", this, &MainWindow::openMemorySearch,
@@ -618,4 +643,28 @@ void MainWindow::updateMenuState() {
     m_reloadAction->setEnabled(contentOk);
     m_pauseAction->setEnabled(contentOk);
     m_frameAdvanceAction->setEnabled(contentOk);
+
+    /* Populate the System submenu based on the loaded system */
+    m_systemMenu->clear();
+    m_systemMenu->setEnabled(false);
+    m_systemMenu->setTitle("System");
+
+    /* Close system-specific tool windows when content changes */
+    if (m_tileViewer) {
+        m_tileViewer->close();
+        m_tileViewer->deleteLater();
+        m_tileViewer = nullptr;
+    }
+
+    if (ar_has_debug() && contentOk) {
+        rd_System const *sys = ar_debug_system();
+        if (sys && sys->v1.description) {
+            const char *desc = sys->v1.description;
+            if (strcmp(desc, "gb") == 0 || strcmp(desc, "gbc") == 0) {
+                m_systemMenu->setTitle(QString("System (%1)").arg(desc));
+                m_systemMenu->setEnabled(true);
+                m_systemMenu->addAction("Tile Viewer", this, &MainWindow::openTileViewer);
+            }
+        }
+    }
 }
