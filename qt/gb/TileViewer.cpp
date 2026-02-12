@@ -206,7 +206,7 @@ TileViewer::TileViewer(QWidget *parent)
     m_infoIndex->setFont(monoFont);
     svbox->addWidget(m_infoIndex);
 
-    m_infoAddr = new QLabel("Addr: -");
+    m_infoAddr = new QLabel("Address: -");
     m_infoAddr->setFont(monoFont);
     svbox->addWidget(m_infoAddr);
 
@@ -281,8 +281,8 @@ void TileViewer::updateSidebar() {
     static constexpr uint64_t blockBase[] = { 0x8000, 0x8800, 0x9000 };
     uint64_t addr = blockBase[block] + (uint64_t)inBlock * 16;
 
-    m_infoIndex->setText(QString("Index: #%1").arg(inBank, 3, 10, QChar('0')));
-    m_infoAddr->setText(QString("Addr: %1").arg(addr, 4, 16, QChar('0')).toUpper());
+    m_infoIndex->setText(QString("Index: %1").arg(inBank, 3, 16, QChar('0')).toUpper());
+    m_infoAddr->setText(QString("Address: %1").arg(addr, 4, 16, QChar('0')).toUpper());
     m_infoBank->setText(QString("Bank: %1").arg(bank));
     m_infoBlock->setText(QString("Block: %1").arg(block));
 

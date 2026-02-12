@@ -8,6 +8,7 @@
 #include "TraceLog.h"
 #include "InputTool.h"
 #include "gb/TileViewer.h"
+#include "gb/TilemapViewer.h"
 
 #include <QMenuBar>
 #include <QMenu>
@@ -89,6 +90,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_traceLog(nullptr)
     , m_inputTool(nullptr)
     , m_tileViewer(nullptr)
+    , m_tilemapViewer(nullptr)
     , m_timer(new QTimer(this))
 {
     setWindowTitle("Arrêt");
@@ -205,6 +207,7 @@ void MainWindow::tick() {
     if (m_traceLog) m_traceLog->refresh();
     if (m_inputTool) m_inputTool->refresh();
     if (m_tileViewer) m_tileViewer->refresh();
+    if (m_tilemapViewer) m_tilemapViewer->refresh();
     ar_check_socket_commands();
 
     if (!ar_running())
@@ -439,6 +442,21 @@ void MainWindow::openTileViewer() {
     }
 }
 
+void MainWindow::openTilemapViewer() {
+    bool firstOpen = !m_tilemapViewer;
+    if (firstOpen) {
+        m_tilemapViewer = new TilemapViewer(this);
+        m_tilemapViewer->setFloating(true);
+        m_tilemapViewer->setAllowedAreas(Qt::NoDockWidgetArea);
+    }
+    if (firstOpen)
+        placeFloatingWidget(this, m_tilemapViewer, {m_memViewer, m_memSearch, m_debugger, m_breakpoints, m_traceLog, m_inputTool, m_tileViewer});
+    else {
+        m_tilemapViewer->show();
+        m_tilemapViewer->raise();
+    }
+}
+
 void MainWindow::openContentInfo() {
     if (!ar_has_debug() || !ar_content_loaded()) {
         QMessageBox::information(this, "Content Info", "No content loaded.");
@@ -655,6 +673,11 @@ void MainWindow::updateMenuState() {
         m_tileViewer->deleteLater();
         m_tileViewer = nullptr;
     }
+    if (m_tilemapViewer) {
+        m_tilemapViewer->close();
+        m_tilemapViewer->deleteLater();
+        m_tilemapViewer = nullptr;
+    }
 
     if (ar_has_debug() && contentOk) {
         rd_System const *sys = ar_debug_system();
@@ -664,6 +687,7 @@ void MainWindow::updateMenuState() {
                 m_systemMenu->setTitle(QString("System (%1)").arg(desc));
                 m_systemMenu->setEnabled(true);
                 m_systemMenu->addAction("Tile Viewer", this, &MainWindow::openTileViewer);
+                m_systemMenu->addAction("Tilemap Viewer", this, &MainWindow::openTilemapViewer);
             }
         }
     }

@@ -13,6 +13,7 @@ class Breakpoints;
 class TraceLog;
 class InputTool;
 class TileViewer;
+class TilemapViewer;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -48,6 +49,7 @@ private slots:
     void openInputTool();
     void openContentInfo();
     void openTileViewer();
+    void openTilemapViewer();
 
 private:
     void buildMenus();
@@ -63,6 +65,7 @@ private:
     TraceLog     *m_traceLog;
     InputTool    *m_inputTool;
     TileViewer   *m_tileViewer;
+    TilemapViewer *m_tilemapViewer;
     QTimer       *m_timer;
     bool          m_paused = false;
     bool          m_stepping = false;
