@@ -19,13 +19,16 @@ void VideoWidget::paintEvent(QPaintEvent *) {
 
     if (!buf || w == 0 || h == 0) return;
 
-    /* XRGB8888 maps to QImage::Format_RGB32 (0xffRRGGBB) */
+    /* XRGB8888 maps to QImage::Format_RGB32 (0xffRRGGBB).
+       Deep-copy so the painter has a stable snapshot — the core thread
+       may be writing into frame_buf concurrently. */
     QImage img(reinterpret_cast<const uchar *>(buf),
                w, h, w * 4, QImage::Format_RGB32);
+    QImage snap = img.copy();
 
     QPainter p(this);
     p.setRenderHint(QPainter::SmoothPixmapTransform, false);
-    p.drawImage(rect(), img);
+    p.drawImage(rect(), snap);
 }
 
 void VideoWidget::keyPressEvent(QKeyEvent *event) {

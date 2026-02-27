@@ -28,8 +28,8 @@
  * Constants
  * ======================================================================== */
 
-#define MAX_WIDTH     256
-#define MAX_HEIGHT    224
+#define MAX_WIDTH     1024
+#define MAX_HEIGHT    576
 #define MAX_PIXELS    (MAX_WIDTH * MAX_HEIGHT)
 #define MAX_VARS      64
 #define MAX_SAVE_SLOTS 10
