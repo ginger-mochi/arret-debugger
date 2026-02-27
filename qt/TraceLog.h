@@ -31,6 +31,8 @@ private:
 
     QPlainTextEdit *m_logView;
     QLineEdit      *m_filePath;
+    QCheckBox      *m_instrCheck;
+    QCheckBox      *m_intCheck;
     QCheckBox      *m_regCheck;
     QCheckBox      *m_indentCheck;
     QPushButton    *m_startBtn;

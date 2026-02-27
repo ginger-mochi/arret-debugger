@@ -1657,10 +1657,10 @@ void ar_process_command(char *line, FILE *out) {
         return;
     }
 
-    /* --- trace on|off|status|cpu|registers|indent --- */
+    /* --- trace on|off|status|cpu|instructions|interrupts|registers|indent --- */
     if (strcmp(cmd, "trace") == 0) {
         if (nargs < 2) {
-            json_error_f(out, "usage: trace on|off|status|cpu|registers|indent ...");
+            json_error_f(out, "usage: trace on|off|status|cpu|instructions|interrupts|registers|indent ...");
             return;
         }
 
@@ -1693,10 +1693,13 @@ void ar_process_command(char *line, FILE *out) {
         }
 
         if (strcmp(arg1, "status") == 0) {
-            json_ok_f(out, "\"tracing\":%s,\"lines\":%lu,\"registers\":%s"
-                          ",\"indent\":%s,\"file\":\"%s\"",
+            json_ok_f(out, "\"tracing\":%s,\"lines\":%lu"
+                          ",\"instructions\":%s,\"interrupts\":%s"
+                          ",\"registers\":%s,\"indent\":%s,\"file\":\"%s\"",
                       ar_trace_active() ? "true" : "false",
                       (unsigned long)ar_trace_total_lines(),
+                      ar_trace_get_instructions() ? "true" : "false",
+                      ar_trace_get_interrupts() ? "true" : "false",
                       ar_trace_get_registers() ? "true" : "false",
                       ar_trace_get_indent() ? "true" : "false",
                       ar_trace_file_path());
@@ -1719,6 +1722,32 @@ void ar_process_command(char *line, FILE *out) {
                           arg2, enable ? "true" : "false");
             else
                 json_error_f(out, "unknown cpu: %s", arg2);
+            return;
+        }
+
+        if (strcmp(arg1, "instructions") == 0) {
+            if (nargs < 3) {
+                json_error_f(out, "usage: trace instructions on|off");
+                return;
+            }
+            if (strcmp(arg2, "on") == 0) ar_trace_set_instructions(true);
+            else if (strcmp(arg2, "off") == 0) ar_trace_set_instructions(false);
+            else { json_error_f(out, "usage: trace instructions on|off"); return; }
+            json_ok_f(out, "\"instructions\":%s",
+                      ar_trace_get_instructions() ? "true" : "false");
+            return;
+        }
+
+        if (strcmp(arg1, "interrupts") == 0) {
+            if (nargs < 3) {
+                json_error_f(out, "usage: trace interrupts on|off");
+                return;
+            }
+            if (strcmp(arg2, "on") == 0) ar_trace_set_interrupts(true);
+            else if (strcmp(arg2, "off") == 0) ar_trace_set_interrupts(false);
+            else { json_error_f(out, "usage: trace interrupts on|off"); return; }
+            json_ok_f(out, "\"interrupts\":%s",
+                      ar_trace_get_interrupts() ? "true" : "false");
             return;
         }
 

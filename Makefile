@@ -125,6 +125,12 @@ $(BUILDDIR)/moc_gb_%.cpp: qt/gb/%.h | $(BUILDDIR)
 $(BUILDDIR)/qt_gb_%.o: qt/gb/%.cpp $(HEADERS) $(QT_MOC_HDRS) $(QT_SUB_MOC_HDRS) | $(BUILDDIR)
 	$(CXX) $(QT_CXXFLAGS) -Iqt -c -o $@ $<
 
+$(BUILDDIR)/moc_psx_%.cpp: qt/psx/%.h | $(BUILDDIR)
+	$(MOC) $< -o $@
+
+$(BUILDDIR)/qt_psx_%.o: qt/psx/%.cpp $(HEADERS) $(QT_MOC_HDRS) $(QT_SUB_MOC_HDRS) | $(BUILDDIR)
+	$(CXX) $(QT_CXXFLAGS) -Iqt -c -o $@ $<
+
 arret-qt: $(BACKEND_OBJS) $(QT_OBJS) $(QT_MOC_OBJS) $(QT_SUB_OBJS) $(QT_SUB_MOC_OBJS)
 	$(CXX) -o $@ $^ $(LDFLAGS) $(QT_LIBS)
 

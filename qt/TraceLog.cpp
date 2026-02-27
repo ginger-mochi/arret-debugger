@@ -50,6 +50,20 @@ TraceLog::TraceLog(QWidget *parent)
     rvbox->addSpacing(8);
 
     /* Options */
+    m_instrCheck = new QCheckBox("Trace instructions");
+    m_instrCheck->setChecked(ar_trace_get_instructions());
+    connect(m_instrCheck, &QCheckBox::toggled, this, [](bool on) {
+        ar_trace_set_instructions(on);
+    });
+    rvbox->addWidget(m_instrCheck);
+
+    m_intCheck = new QCheckBox("Trace interrupts");
+    m_intCheck->setChecked(ar_trace_get_interrupts());
+    connect(m_intCheck, &QCheckBox::toggled, this, [](bool on) {
+        ar_trace_set_interrupts(on);
+    });
+    rvbox->addWidget(m_intCheck);
+
     m_regCheck = new QCheckBox("Registers");
     m_regCheck->setChecked(ar_trace_get_registers());
     connect(m_regCheck, &QCheckBox::toggled, this, [](bool on) {
@@ -105,6 +119,8 @@ void TraceLog::toggleTrace() {
         ar_trace_stop();
     } else {
         /* Apply current checkbox state before starting */
+        ar_trace_set_instructions(m_instrCheck->isChecked());
+        ar_trace_set_interrupts(m_intCheck->isChecked());
         ar_trace_set_registers(m_regCheck->isChecked());
         ar_trace_set_indent(m_indentCheck->isChecked());
 
@@ -160,6 +176,10 @@ void TraceLog::refresh() {
         updateUI();
 
     /* Sync checkbox state */
+    if (m_instrCheck->isChecked() != ar_trace_get_instructions())
+        m_instrCheck->setChecked(ar_trace_get_instructions());
+    if (m_intCheck->isChecked() != ar_trace_get_interrupts())
+        m_intCheck->setChecked(ar_trace_get_interrupts());
     if (m_regCheck->isChecked() != ar_trace_get_registers())
         m_regCheck->setChecked(ar_trace_get_registers());
     if (m_indentCheck->isChecked() != ar_trace_get_indent())

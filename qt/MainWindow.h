@@ -14,6 +14,7 @@ class TraceLog;
 class InputTool;
 class TileViewer;
 class TilemapViewer;
+class VramViewer;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -50,6 +51,7 @@ private slots:
     void openContentInfo();
     void openTileViewer();
     void openTilemapViewer();
+    void openVramViewer();
 
 private:
     void buildMenus();
@@ -66,6 +68,7 @@ private:
     InputTool    *m_inputTool;
     TileViewer   *m_tileViewer;
     TilemapViewer *m_tilemapViewer;
+    VramViewer   *m_vramViewer;
     QTimer       *m_timer;
     bool          m_paused = false;
     bool          m_stepping = false;

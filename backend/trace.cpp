@@ -55,6 +55,8 @@ static void ring_write(const char *line) {
  * ======================================================================== */
 
 static bool g_active = false;
+static bool g_instructions = true;
+static bool g_interrupts = true;
 static bool g_registers = false;
 static bool g_indent = false;
 static FILE *g_file = nullptr;
@@ -71,6 +73,9 @@ struct TraceCpu {
 
 static std::vector<TraceCpu> g_cpus;
 static std::unordered_map<rd_SubscriptionID, int> g_sub_to_cpu;
+
+/* Interrupt subscription (one per trace session) */
+static rd_SubscriptionID g_int_sub_id = -1;
 
 /* Persistent CPU settings (survive across trace sessions) */
 static std::unordered_map<std::string, bool> g_cpu_settings;
@@ -155,27 +160,43 @@ static void sync_subscriptions(void) {
     }
     g_sub_to_cpu.clear();
 
+    if (g_int_sub_id >= 0) {
+        dif->v1.unsubscribe(g_int_sub_id);
+        g_int_sub_id = -1;
+    }
+
     if (!g_active) return;
 
-    /* Subscribe for each enabled CPU */
-    for (int i = 0; i < (int)g_cpus.size(); i++) {
-        TraceCpu &tc = g_cpus[i];
-        if (!tc.enabled) continue;
+    /* Subscribe for each enabled CPU (instruction tracing) */
+    if (g_instructions) {
+        for (int i = 0; i < (int)g_cpus.size(); i++) {
+            TraceCpu &tc = g_cpus[i];
+            if (!tc.enabled) continue;
 
-        rd_Subscription sub{};
-        sub.type = RD_EVENT_EXECUTION;
-        sub.execution.cpu = tc.cpu;
-        sub.execution.type = RD_STEP;
-        sub.execution.address_range_begin = 0;
-        sub.execution.address_range_end = UINT64_MAX;
+            rd_Subscription sub{};
+            sub.type = RD_EVENT_EXECUTION;
+            sub.execution.cpu = tc.cpu;
+            sub.execution.type = RD_STEP;
+            sub.execution.address_range_begin = 0;
+            sub.execution.address_range_end = UINT64_MAX;
 
-        tc.sub_id = dif->v1.subscribe(&sub);
-        if (tc.sub_id >= 0) {
-            g_sub_to_cpu[tc.sub_id] = i;
-        } else {
-            fprintf(stderr, "[arret] trace: failed to subscribe for CPU %s\n",
-                    tc.id.c_str());
+            tc.sub_id = dif->v1.subscribe(&sub);
+            if (tc.sub_id >= 0) {
+                g_sub_to_cpu[tc.sub_id] = i;
+            } else {
+                fprintf(stderr, "[arret] trace: failed to subscribe for CPU %s\n",
+                        tc.id.c_str());
+            }
         }
+    }
+
+    /* Subscribe for interrupt events */
+    if (g_interrupts) {
+        rd_Subscription sub{};
+        sub.type = RD_EVENT_INTERRUPT;
+        g_int_sub_id = dif->v1.subscribe(&sub);
+        if (g_int_sub_id < 0)
+            fprintf(stderr, "[arret] trace: failed to subscribe for interrupts\n");
     }
 }
 
@@ -342,6 +363,12 @@ bool ar_trace_cpu_enabled(const char *cpu_id) {
     return false;
 }
 
+void ar_trace_set_instructions(bool enable) { g_instructions = enable; }
+bool ar_trace_get_instructions(void) { return g_instructions; }
+
+void ar_trace_set_interrupts(bool enable) { g_interrupts = enable; }
+bool ar_trace_get_interrupts(void) { return g_interrupts; }
+
 void ar_trace_set_registers(bool enable) { g_registers = enable; }
 bool ar_trace_get_registers(void) { return g_registers; }
 
@@ -375,10 +402,31 @@ uint64_t ar_trace_total_lines(void) {
 }
 
 bool ar_trace_is_sub(rd_SubscriptionID sub_id) {
+    if (sub_id == g_int_sub_id && g_int_sub_id >= 0) return true;
     return g_sub_to_cpu.find(sub_id) != g_sub_to_cpu.end();
 }
 
 bool ar_trace_on_event(rd_SubscriptionID sub_id, rd_Event const *event) {
+    /* Handle interrupt events */
+    if (event->type == RD_EVENT_INTERRUPT) {
+        if (sub_id != g_int_sub_id) return false;
+
+        const rd_InterruptEvent &intr = event->interrupt;
+        char line[TRACE_LINE_SIZE];
+        snprintf(line, sizeof(line), "--- IRQ cpu=%s kind=%d ret=%lX vec=%lX",
+                 intr.cpu ? intr.cpu->v1.id : "?",
+                 intr.kind,
+                 (unsigned long)intr.return_address,
+                 (unsigned long)intr.vector_address);
+
+        ring_write(line);
+        if (g_file) {
+            fputs(line, g_file);
+            fputc('\n', g_file);
+        }
+        return false;
+    }
+
     if (event->type != RD_EVENT_EXECUTION) return false;
 
     auto it = g_sub_to_cpu.find(sub_id);

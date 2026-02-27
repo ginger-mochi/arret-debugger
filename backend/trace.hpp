@@ -42,6 +42,14 @@ bool ar_trace_cpu_enable(const char *cpu_id, bool enable);
 /* Query whether a CPU is enabled for tracing. */
 bool ar_trace_cpu_enabled(const char *cpu_id);
 
+/* Enable/disable instruction tracing (default: true). */
+void ar_trace_set_instructions(bool enable);
+bool ar_trace_get_instructions(void);
+
+/* Enable/disable interrupt tracing (default: true). */
+void ar_trace_set_interrupts(bool enable);
+bool ar_trace_get_interrupts(void);
+
 /* Enable/disable register logging after "; ". */
 void ar_trace_set_registers(bool enable);
 bool ar_trace_get_registers(void);

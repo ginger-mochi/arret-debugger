@@ -153,6 +153,7 @@ private slots:
     void onGoTo();
     void onCopy();
     void onPaste();
+    void onDump();
     void onScrollChanged(int value);
 
 private:

@@ -19,6 +19,9 @@
 #include <QContextMenuEvent>
 #include <QMessageBox>
 #include <QInputDialog>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QDateTime>
 #include <unordered_map>
 #include <vector>
 
@@ -620,6 +623,8 @@ MemoryViewer::MemoryViewer(QWidget *parent)
                          QKeySequence::Copy);
     editMenu->addAction("Paste", this, &MemoryViewer::onPaste,
                          QKeySequence::Paste);
+    editMenu->addSeparator();
+    editMenu->addAction("Dump...", this, &MemoryViewer::onDump);
 
     /* Region selector */
     auto *topRow = new QHBoxLayout;
@@ -724,11 +729,23 @@ void MemoryViewer::populateRegions() {
     }
 
     for (auto *m : seen) {
+        QString sizeStr;
+        uint64_t sz = m->v1.size;
+        if (sz >= 10000) {
+            if (sz >= 1024ULL * 1024 * 1024)
+                sizeStr = QString("%1 GiB").arg(sz / (1024.0 * 1024 * 1024), 0, 'f', 1);
+            else if (sz >= 1024 * 1024)
+                sizeStr = QString("%1 MiB").arg(sz / (1024.0 * 1024), 0, 'f', 1);
+            else
+                sizeStr = QString("%1 KiB").arg(sz / 1024.0, 0, 'f', 1);
+        } else {
+            sizeStr = QString("%1 bytes").arg(sz);
+        }
         m_regionCombo->addItem(
-            QString("%1 (0x%2, %3 bytes)")
+            QString("%1 (0x%2, %3)")
                 .arg(m->v1.id)
                 .arg(m->v1.base_address, 0, 16)
-                .arg(m->v1.size),
+                .arg(sizeStr),
             QVariant::fromValue(reinterpret_cast<quintptr>(m)));
     }
 }
@@ -827,6 +844,62 @@ void MemoryViewer::onPaste() {
     }
 
     refresh();
+}
+
+void MemoryViewer::onDump() {
+    if (!m_state.mem || m_state.size == 0) return;
+
+    /* Build default filename: content-region-timestamp.bin */
+    QString contentName;
+    const char *base = ar_rompath_base();
+    if (base) {
+        contentName = QFileInfo(QString::fromUtf8(base)).baseName();
+    }
+    if (contentName.isEmpty())
+        contentName = "dump";
+
+    QString regionId = QString::fromUtf8(m_state.mem->v1.id);
+    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-ddTHH-mm");
+    QString defaultName = QString("%1-%2-%3.bin")
+                              .arg(contentName, regionId, timestamp);
+
+    /* Size warning for regions >= 1MB */
+    if (m_state.size >= 1024 * 1024) {
+        auto answer = QMessageBox::question(this, "Large Region",
+            QString("This region is %1 bytes (%2 MB).\nDump anyway?")
+                .arg(m_state.size)
+                .arg(m_state.size / (1024.0 * 1024.0), 0, 'f', 1),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes)
+            return;
+    }
+
+    QString path = QFileDialog::getSaveFileName(this, "Dump Memory", defaultName,
+                                                 "Binary Files (*.bin);;All Files (*)");
+    if (path.isEmpty()) return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        QMessageBox::critical(this, "Dump Error",
+            QString("Failed to open file:\n%1").arg(path));
+        return;
+    }
+
+    constexpr int CHUNK = 4096;
+    uint8_t buf[CHUNK];
+    uint64_t remaining = m_state.size;
+    uint64_t addr = m_state.baseAddr;
+
+    while (remaining > 0) {
+        int n = (remaining > CHUNK) ? CHUNK : (int)remaining;
+        for (int i = 0; i < n; i++)
+            buf[i] = m_state.mem->v1.peek(m_state.mem, addr + i, false);
+        file.write(reinterpret_cast<const char *>(buf), n);
+        addr += n;
+        remaining -= n;
+    }
+
+    file.close();
 }
 
 void MemoryViewer::onScrollChanged(int value) {

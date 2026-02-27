@@ -9,6 +9,7 @@
 #include "InputTool.h"
 #include "gb/TileViewer.h"
 #include "gb/TilemapViewer.h"
+#include "psx/VramViewer.h"
 
 #include <QMenuBar>
 #include <QMenu>
@@ -91,6 +92,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_inputTool(nullptr)
     , m_tileViewer(nullptr)
     , m_tilemapViewer(nullptr)
+    , m_vramViewer(nullptr)
     , m_timer(new QTimer(this))
 {
     setWindowTitle("Arrêt");
@@ -208,6 +210,7 @@ void MainWindow::tick() {
     if (m_inputTool) m_inputTool->refresh();
     if (m_tileViewer) m_tileViewer->refresh();
     if (m_tilemapViewer) m_tilemapViewer->refresh();
+    if (m_vramViewer) m_vramViewer->refresh();
     ar_check_socket_commands();
 
     if (!ar_running())
@@ -457,6 +460,21 @@ void MainWindow::openTilemapViewer() {
     }
 }
 
+void MainWindow::openVramViewer() {
+    bool firstOpen = !m_vramViewer;
+    if (firstOpen) {
+        m_vramViewer = new VramViewer(this);
+        m_vramViewer->setFloating(true);
+        m_vramViewer->setAllowedAreas(Qt::NoDockWidgetArea);
+    }
+    if (firstOpen)
+        placeFloatingWidget(this, m_vramViewer, {m_memViewer, m_memSearch, m_debugger, m_breakpoints, m_traceLog, m_inputTool, m_tileViewer, m_tilemapViewer});
+    else {
+        m_vramViewer->show();
+        m_vramViewer->raise();
+    }
+}
+
 void MainWindow::openContentInfo() {
     if (!ar_has_debug() || !ar_content_loaded()) {
         QMessageBox::information(this, "Content Info", "No content loaded.");
@@ -678,6 +696,11 @@ void MainWindow::updateMenuState() {
         m_tilemapViewer->deleteLater();
         m_tilemapViewer = nullptr;
     }
+    if (m_vramViewer) {
+        m_vramViewer->close();
+        m_vramViewer->deleteLater();
+        m_vramViewer = nullptr;
+    }
 
     if (ar_has_debug() && contentOk) {
         rd_System const *sys = ar_debug_system();
@@ -688,6 +711,11 @@ void MainWindow::updateMenuState() {
                 m_systemMenu->setEnabled(true);
                 m_systemMenu->addAction("Tile Viewer", this, &MainWindow::openTileViewer);
                 m_systemMenu->addAction("Tilemap Viewer", this, &MainWindow::openTilemapViewer);
+            }
+            if (strcmp(desc, "psx") == 0) {
+                m_systemMenu->setTitle(QString("System (%1)").arg(desc));
+                m_systemMenu->setEnabled(true);
+                m_systemMenu->addAction("VRAM Viewer", this, &MainWindow::openVramViewer);
             }
         }
     }

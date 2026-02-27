@@ -43,6 +43,8 @@ All responses are single-line JSON. Errors return `{"ok":false,"error":"message"
 | `trace off` | Stop execution trace | `{"ok":true,"tracing":false,"lines":N}` |
 | `trace status` | Query trace state | `{"ok":true,"tracing":...,"lines":N,...}` |
 | `trace cpu <name> on\|off` | Enable/disable tracing a CPU | `{"ok":true,"cpu":"...","enabled":...}` |
+| `trace instructions on\|off` | Toggle instruction tracing (default: on) | `{"ok":true,"instructions":...}` |
+| `trace interrupts on\|off` | Toggle interrupt tracing (default: on) | `{"ok":true,"interrupts":...}` |
 | `trace registers on\|off` | Toggle register state in trace output | `{"ok":true,"registers":...}` |
 | `trace indent on\|off` | Toggle SP-based indentation | `{"ok":true,"indent":...}` |
 | `reset` | Reset emulated system | `{"ok":true}` |
