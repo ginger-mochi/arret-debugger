@@ -63,6 +63,7 @@ struct Arch {
     unsigned num_reg_layout;
     const TraceReg *trace_regs;         // NULL = log all registers
     unsigned num_trace_regs;
+    unsigned branch_delay_slots;    // 0 = no delay slot; 1 = MIPS-style (branch takes effect after next insn)
 };
 
 const Arch *arch_for_cpu(unsigned cpu_type);

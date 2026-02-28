@@ -207,6 +207,20 @@ rd_Memory const   *ar_debug_mem(void);
 rd_Memory const   *ar_find_memory_by_id(const char *id);
 rd_System const   *ar_debug_system(void);
 
+/* Auxiliary event handler — lets UI modules (e.g. GPU event log) intercept
+ * specific subscriptions on the core thread without touching the main
+ * handle_event logic.  is_sub returns true for subscriptions owned by the
+ * aux handler; on_event processes the event (must return false). */
+typedef bool (*ar_aux_is_sub_fn)(rd_SubscriptionID);
+typedef bool (*ar_aux_event_fn)(rd_SubscriptionID, rd_Event const *);
+void ar_set_aux_event_handler(ar_aux_is_sub_fn is_sub, ar_aux_event_fn on_event);
+void ar_clear_aux_event_handler(void);
+
+/* Post-frame hook — called on the core thread right after retro_run(). */
+typedef void (*ar_post_frame_fn)(void);
+void ar_set_post_frame_hook(ar_post_frame_fn fn);
+void ar_clear_post_frame_hook(void);
+
 /* Stepping */
 #define AR_STEP_IN   0
 #define AR_STEP_OVER 1

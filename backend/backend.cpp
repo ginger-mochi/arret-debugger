@@ -172,6 +172,13 @@ static std::mutex               g_block_mutex;
 static std::condition_variable  g_block_cv;
 static bool                     g_block_resume = false;
 
+/* Auxiliary event handler (for GPU event log capture, etc.) */
+static ar_aux_is_sub_fn g_aux_is_sub = nullptr;
+static ar_aux_event_fn  g_aux_on_event = nullptr;
+
+/* Post-frame hook (core thread, after retro_run) */
+static ar_post_frame_fn g_post_frame_hook = nullptr;
+
 /* JSON output fd (saved original stdout) */
 static FILE *json_out_saved = NULL;
 
@@ -408,6 +415,12 @@ static bool debug_handle_event(void *user_data, rd_SubscriptionID sub_id,
     /* Temp subs exist only for cleanup — they never pause */
     for (auto &[cpu, tsub] : g_skip_temp_subs) {
         if (sub_id == tsub) return false;
+    }
+
+    /* Auxiliary event handler (GPU event log capture, etc.) */
+    if (g_aux_is_sub && g_aux_is_sub(sub_id)) {
+        if (g_aux_on_event) g_aux_on_event(sub_id, event);
+        return false;
     }
 
     /* Trace logging (never halts).  Suppress at skip addresses to avoid
@@ -823,6 +836,7 @@ void ar_run_frame(void) {
         if (g_core_state == CORE_DONE) g_core_state = CORE_IDLE;
     } else {
         core.retro_run();
+        if (g_post_frame_hook) g_post_frame_hook();
     }
 }
 
@@ -838,6 +852,7 @@ static void core_thread_func() {
         lock.unlock();
 
         core.retro_run();
+        if (g_post_frame_hook) g_post_frame_hook();
 
         lock.lock();
         if (g_core_state == CORE_RUNNING)
@@ -1078,6 +1093,19 @@ uint64_t ar_debug_pc(void) {
     if (!g_has_debug || !debug_cpu_ptr) return 0;
     return cpu_get_pc(debug_cpu_ptr);
 }
+
+void ar_set_aux_event_handler(ar_aux_is_sub_fn is_sub, ar_aux_event_fn on_event) {
+    g_aux_is_sub = is_sub;
+    g_aux_on_event = on_event;
+}
+
+void ar_clear_aux_event_handler(void) {
+    g_aux_is_sub = nullptr;
+    g_aux_on_event = nullptr;
+}
+
+void ar_set_post_frame_hook(ar_post_frame_fn fn) { g_post_frame_hook = fn; }
+void ar_clear_post_frame_hook(void) { g_post_frame_hook = nullptr; }
 
 void ar_debug_set_skip(void) {
     if (!g_has_debug || !debugger_if_ptr) return;

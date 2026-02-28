@@ -80,8 +80,19 @@ TraceLog::TraceLog(QWidget *parent)
 
     rvbox->addSpacing(8);
 
+    /* System-specific trace options (populated lazily) */
+    m_sysOptLabel = new QLabel("System:");
+    m_sysOptLabel->setVisible(false);
+    rvbox->addWidget(m_sysOptLabel);
+    m_sysOptLayout = new QVBoxLayout;
+    rvbox->addLayout(m_sysOptLayout);
+
+    rvbox->addSpacing(8);
+
     /* CPU checkboxes (populated lazily) */
-    rvbox->addWidget(new QLabel("CPUs:"));
+    m_cpuLabel = new QLabel("CPUs:");
+    m_cpuLabel->setVisible(false);
+    rvbox->addWidget(m_cpuLabel);
     m_cpuLayout = new QVBoxLayout;
     rvbox->addLayout(m_cpuLayout);
 
@@ -91,6 +102,13 @@ TraceLog::TraceLog(QWidget *parent)
     m_startBtn = new QPushButton("Start");
     connect(m_startBtn, &QPushButton::clicked, this, &TraceLog::toggleTrace);
     rvbox->addWidget(m_startBtn);
+
+    /* Clear button */
+    auto *clearBtn = new QPushButton("Clear");
+    connect(clearBtn, &QPushButton::clicked, this, [this]() {
+        m_logView->clear();
+    });
+    rvbox->addWidget(clearBtn);
 
     rvbox->addSpacing(4);
 
@@ -128,6 +146,10 @@ void TraceLog::toggleTrace() {
         for (auto &cc : m_cpuChecks)
             ar_trace_cpu_enable(cc.id.toUtf8().constData(), cc.check->isChecked());
 
+        /* Apply sys option settings */
+        for (auto &so : m_sysOptChecks)
+            ar_trace_sys_option_enable(so.idx, so.check->isChecked());
+
         QString path = m_filePath->text().trimmed();
         ar_trace_start(path.isEmpty() ? nullptr : path.toUtf8().constData());
     }
@@ -156,7 +178,43 @@ void TraceLog::populateCpus() {
         m_cpuChecks.append({id, cb});
     }
 
+    if (!m_cpuChecks.isEmpty())
+        m_cpuLabel->setVisible(true);
+
     m_cpusPopulated = true;
+}
+
+void TraceLog::populateSysOptions() {
+    if (m_sysOptsPopulated) return;
+    if (!ar_has_debug()) return;
+
+    unsigned count = ar_trace_sys_option_count();
+    if (count == 0) return;
+
+    for (unsigned i = 0; i < count; i++) {
+        const char *label = ar_trace_sys_option_label(i);
+        if (!label) continue;
+
+        auto *cb = new QCheckBox(QString::fromUtf8(label));
+        cb->setChecked(ar_trace_sys_option_enabled(i));
+
+        unsigned idx = i;
+        connect(cb, &QCheckBox::toggled, this, [idx](bool on) {
+            ar_trace_sys_option_enable(idx, on);
+        });
+
+        m_sysOptLayout->addWidget(cb);
+        m_sysOptChecks.append({idx, cb});
+    }
+
+    if (!m_sysOptChecks.isEmpty()) {
+        rd_System const *sys = ar_debug_system();
+        if (sys && sys->v1.description)
+            m_sysOptLabel->setText(QString("System (%1):").arg(sys->v1.description));
+        m_sysOptLabel->setVisible(true);
+    }
+
+    m_sysOptsPopulated = true;
 }
 
 void TraceLog::updateUI() {
@@ -166,9 +224,11 @@ void TraceLog::updateUI() {
 }
 
 void TraceLog::refresh() {
-    /* Populate CPUs on first refresh with debug support */
+    /* Populate CPUs and sys options on first refresh with debug support */
     if (!m_cpusPopulated && ar_has_debug())
         populateCpus();
+    if (!m_sysOptsPopulated && ar_has_debug())
+        populateSysOptions();
 
     /* Sync button state (trace may have started/stopped via TCP) */
     bool active = ar_trace_active();
@@ -184,6 +244,13 @@ void TraceLog::refresh() {
         m_regCheck->setChecked(ar_trace_get_registers());
     if (m_indentCheck->isChecked() != ar_trace_get_indent())
         m_indentCheck->setChecked(ar_trace_get_indent());
+
+    /* Sync sys option checkboxes */
+    for (auto &so : m_sysOptChecks) {
+        bool en = ar_trace_sys_option_enabled(so.idx);
+        if (so.check->isChecked() != en)
+            so.check->setChecked(en);
+    }
 
     if (!active) return;
 

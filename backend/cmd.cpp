@@ -1777,6 +1777,46 @@ void ar_process_command(char *line, FILE *out) {
             return;
         }
 
+        if (strcmp(arg1, "option") == 0) {
+            /* trace option <index> on|off   OR   trace option list */
+            if (nargs < 3) {
+                json_error_f(out, "usage: trace option <index> on|off  OR  trace option list");
+                return;
+            }
+            if (strcmp(arg2, "list") == 0) {
+                unsigned count = ar_trace_sys_option_count();
+                fprintf(out, "{\"ok\":true,\"options\":[");
+                for (unsigned i = 0; i < count; i++) {
+                    if (i > 0) fputc(',', out);
+                    fprintf(out, "{\"index\":%u,\"label\":\"%s\",\"enabled\":%s}",
+                            i, ar_trace_sys_option_label(i),
+                            ar_trace_sys_option_enabled(i) ? "true" : "false");
+                }
+                fprintf(out, "]}\n");
+                return;
+            }
+            char *endp;
+            unsigned idx = (unsigned)strtoul(arg2, &endp, 10);
+            if (*endp != '\0' || idx >= ar_trace_sys_option_count()) {
+                json_error_f(out, "invalid option index: %s", arg2);
+                return;
+            }
+            if (nargs < 4) {
+                json_error_f(out, "usage: trace option %u on|off", idx);
+                return;
+            }
+            bool enable;
+            if (strcmp(rest, "on") == 0) enable = true;
+            else if (strcmp(rest, "off") == 0) enable = false;
+            else { json_error_f(out, "usage: trace option %u on|off", idx); return; }
+
+            ar_trace_sys_option_enable(idx, enable);
+            json_ok_f(out, "\"option\":%u,\"label\":\"%s\",\"enabled\":%s",
+                      idx, ar_trace_sys_option_label(idx),
+                      ar_trace_sys_option_enabled(idx) ? "true" : "false");
+            return;
+        }
+
         json_error_f(out, "unknown trace subcommand: %s", arg1);
         return;
     }

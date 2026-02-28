@@ -74,7 +74,7 @@ public:
         m_scrollBar->blockSignals(true);
         m_scrollBar->setValue((int)(m_centerAddr / m_alignment));
         m_scrollBar->blockSignals(false);
-        m_selectedAddr = UINT64_MAX;
+        m_selectedAddr = addr;
         if (m_valid && m_mem) {
             disassembleAround();
             update();
@@ -84,23 +84,34 @@ public:
     void refresh(rd_Cpu const *cpu, bool paused) {
         if (!paused || !cpu || !ar_content_loaded()) {
             m_valid = false;
+            m_statusMsg = "Running...";
             update();
             return;
         }
 
         auto *mem = cpu->v1.memory_region;
-        if (!mem) { m_valid = false; update(); return; }
+        if (!mem) { m_valid = false; m_statusMsg = "No memory region"; update(); return; }
 
         auto *arch = arch::arch_for_cpu(cpu->v1.type);
-        if (!arch) { m_valid = false; update(); return; }
+        if (!arch) { m_valid = false; m_statusMsg = "Unknown CPU architecture"; update(); return; }
 
         m_pc = get_pc(cpu);
+        m_delayPc = 0;
+        m_hasDelayPc = false;
+        if (cpu->v1.pipeline_get_delay_pc) {
+            uint64_t dpc;
+            if (cpu->v1.pipeline_get_delay_pc(cpu, 1, &dpc) && dpc != m_pc) {
+                m_delayPc = dpc;
+                m_hasDelayPc = true;
+            }
+        }
         m_cpu = cpu;
         m_mem = mem;
         m_cpuType = cpu->v1.type;
         m_addrWidth = (mem->v1.size <= 0x10000) ? 4 : 8;
         m_maxInsnSize = arch->max_insn_size;
         m_alignment = arch->alignment;
+        m_branchDelaySlots = arch->branch_delay_slots;
 
         /* Update scrollbar range (units = alignment-sized steps) */
         int maxVal = (int)((mem->v1.size - 1) / m_alignment);
@@ -189,7 +200,7 @@ protected:
 
         if (!m_valid || m_insns.empty()) {
             p.setPen(QColor(150, 150, 150));
-            p.drawText(drawRect, Qt::AlignCenter, "Running...");
+            p.drawText(drawRect, Qt::AlignCenter, m_statusMsg);
             return;
         }
 
@@ -207,7 +218,7 @@ protected:
             for (int i = 0; i < centerIdx; i++) {
                 if (hasLabelLine(i)) naturalY += lineH;
                 naturalY += lineH;
-                if (m_insns[i].breaks_flow) naturalY += lineH / 2;
+                if (hasFlowBreakAfter(i)) naturalY += lineH / 2;
             }
             if (hasLabelLine(centerIdx)) naturalY += lineH;
             int rowMid = naturalY - lineH / 2 + fm.descent();
@@ -376,7 +387,7 @@ protected:
                         maxVisibleBank = m_banks[i];
                 }
                 vy += lineH;
-                if (m_insns[i].breaks_flow) vy += lineH / 2;
+                if (hasFlowBreakAfter(i)) vy += lineH / 2;
                 if (rowTop > drawRect.height()) break;
             }
         }
@@ -413,7 +424,7 @@ protected:
             /* Skip rows entirely off-screen */
             if (rowBot < 0) {
                 y += lineH;
-                if (insn.breaks_flow) y += lineH / 2;
+                if (hasFlowBreakAfter(i)) y += lineH / 2;
                 continue;
             }
             if (rowTop > drawRect.height()) break;
@@ -492,8 +503,11 @@ protected:
             while (bytes.length() < byteColChars)
                 bytes += ' ';
 
+            bool isDelayPc = m_hasDelayPc && insn.address == m_delayPc;
             if (marker == '>' && !selected)
                 p.setPen(QColor(0, 140, 0));
+            else if (isDelayPc && !selected)
+                p.setPen(QColor(40, 10, 210));
 
             /* Draw prefix: bank + address + marker + bytes */
             QString prefix = bankPrefix + addr + marker + ' ' + bytes + "  ";
@@ -541,11 +555,11 @@ protected:
                 p.setPen(savedPen);
             }
 
-            if (marker == '>' && !selected)
+            if ((marker == '>' || isDelayPc) && !selected)
                 p.setPen(Qt::black);
 
             y += lineH;
-            if (insn.breaks_flow)
+            if (hasFlowBreakAfter(i))
                 y += lineH / 2;
         }
     }
@@ -844,6 +858,29 @@ private:
         int column;    /* assigned column (0 = innermost/rightmost) */
     };
 
+    /* For pipelined CPUs (MIPS), breaks_flow and arrow sources shift to the
+       delay slot.  Returns the index where the visual gap/arrow should appear
+       for a branch at instruction i. */
+    int delayedFlowIdx(int i) const {
+        int d = i + (int)m_branchDelaySlots;
+        return std::min(d, (int)m_insns.size() - 1);
+    }
+
+    /* True if instruction i should have a flow-break gap after it (accounting
+       for branch delay: the gap appears after the delay slot, not the branch). */
+    bool hasFlowBreakAfter(int i) const {
+        if (m_branchDelaySlots == 0)
+            return m_insns[i].breaks_flow;
+        // On delay-slot architectures, the gap goes after the delay slot.
+        // Check if any instruction within delay range targets this row.
+        int lo = std::max(0, i - (int)m_branchDelaySlots);
+        for (int k = lo; k <= i; k++) {
+            if (m_insns[k].breaks_flow && delayedFlowIdx(k) == i)
+                return true;
+        }
+        return false;
+    }
+
     /* Compute vertical center of each instruction row */
     std::vector<int> computeRowYCenters(int lineH, int yOffset, int descent) const {
         std::vector<int> ys(m_insns.size());
@@ -852,7 +889,7 @@ private:
             if (hasLabelLine(i)) y += lineH;
             ys[i] = y - lineH / 2 + descent;
             y += lineH;
-            if (m_insns[i].breaks_flow) y += lineH / 2;
+            if (hasFlowBreakAfter(i)) y += lineH / 2;
         }
         return ys;
     }
@@ -865,16 +902,19 @@ private:
         for (int i = 0; i < (int)m_insns.size(); i++)
             addrIdx[m_insns[i].address] = i;
 
-        /* Collect arrows where both endpoints are visible (or within 1 row) */
+        /* Collect arrows where both endpoints are visible (or within 1 row).
+           For delay-slot architectures, the arrow originates from the delay
+           slot (branch_delay_slots after the branch instruction). */
         int margin = lineH;
         std::vector<JumpArrow> arrows;
         for (int i = 0; i < (int)m_insns.size(); i++) {
             if (!m_insns[i].has_target) continue;
             auto it = addrIdx.find(m_insns[i].target);
             if (it == addrIdx.end()) continue;
+            int src = delayedFlowIdx(i);
             int j = it->second;
-            if (i == j) continue;
-            int sy = rowYs[i], dy = rowYs[j];
+            if (src == j) continue;
+            int sy = rowYs[src], dy = rowYs[j];
             if (sy < -margin || sy > viewHeight + margin) continue;
             if (dy < -margin || dy > viewHeight + margin) continue;
             arrows.push_back({ sy, dy, -1 });
@@ -915,7 +955,8 @@ private:
         std::vector<int> stubs;
         for (int i = 0; i < (int)m_insns.size(); i++) {
             if (!m_insns[i].has_target) continue;
-            int sy = rowYs[i];
+            int src = delayedFlowIdx(i);
+            int sy = rowYs[src];
             if (sy < -margin || sy > viewHeight + margin) continue;
 
             auto it = addrIdx.find(m_insns[i].target);
@@ -940,7 +981,7 @@ private:
             for (int i = 0; i < centerIdx; i++) {
                 if (hasLabelLine(i)) naturalY += lineH;
                 naturalY += lineH;
-                if (m_insns[i].breaks_flow) naturalY += lineH / 2;
+                if (hasFlowBreakAfter(i)) naturalY += lineH / 2;
             }
             if (hasLabelLine(centerIdx)) naturalY += lineH;
             int rowMid = naturalY - lineH / 2 + fm.descent();
@@ -955,7 +996,7 @@ private:
             if (clickY >= rowTop && clickY < rowBot)
                 return i;
             y += lineH;
-            if (m_insns[i].breaks_flow)
+            if (hasFlowBreakAfter(i))
                 y += lineH / 2;
         }
         return -1;
@@ -1117,13 +1158,17 @@ private:
     MainWindow *m_mainWindow;
     uint64_t m_selectedAddr = UINT64_MAX;
     uint64_t m_pc = 0;
+    uint64_t m_delayPc = 0;
+    bool m_hasDelayPc = false;
     uint64_t m_centerAddr = 0;
     uint64_t m_lastAlignedPc = UINT64_MAX;   /* force initial snap */
     bool m_valid = false;
+    const char *m_statusMsg = "Running...";
     int m_addrWidth = 4;
     unsigned m_maxInsnSize = 3;
     unsigned m_alignment = 1;
     unsigned m_cpuType = 0;
+    unsigned m_branchDelaySlots = 0;
     rd_Cpu const *m_cpu = nullptr;
     rd_Memory const *m_mem = nullptr;
     QScrollBar *m_scrollBar;

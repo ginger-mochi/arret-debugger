@@ -8,8 +8,21 @@
 #include <QButtonGroup>
 #include <QPainter>
 #include <QMouseEvent>
+#include <QGroupBox>
+#include <QListWidget>
+#include <QTextEdit>
+#include <QPushButton>
+#include <QSplitter>
+#include <QFont>
+#include <QShortcut>
 
 #include "backend.hpp"
+#include "sys/psx_gpu_decode.hpp"
+#include "sys/psx_gpu_capture.hpp"
+
+static constexpr int VRAM_BYTES = 1048576;
+static constexpr int VRAM_HW_W = 1024;
+static constexpr int VRAM_H = 512;
 
 /* ======================================================================== */
 /* VramWidget                                                                */
@@ -32,28 +45,14 @@ QSize VramWidget::sizeHint() const {
 }
 
 void VramWidget::pageGrid(int &cols, int &rows, int &pw, int &ph) const {
-    /* Texture page grid depends on format.
-     * Texture pages are 256 texels wide.
-     * In VRAM halfwords: 15-bit = 256hw, 24-bit = 384hw (not evenly
-     * divisible), 8-bit = 128hw, 4-bit = 64hw.
-     * Page height is always 256 lines. */
     ph = 256;
-    rows = 2; // 512 / 256
+    rows = 2;
 
     switch (m_format) {
-    case FMT_15BIT:
-        /* 256 pixels = 256 halfwords → 1024/256 = 4 columns */
-        pw = 256; cols = 4; break;
-    case FMT_8BIT:
-        /* 256 texels = 128 halfwords → 2048 pixels / 256 = 8 columns */
-        pw = 256; cols = 8; break;
-    case FMT_4BIT:
-        /* 256 texels = 64 halfwords → 4096 pixels / 256 = 16 columns */
-        pw = 256; cols = 16; break;
-    case FMT_24BIT:
-        /* 256 pixels × 1.5 bytes = 384 halfwords; doesn't tile evenly.
-         * Approximate: use ~227-pixel pages (682/3 ≈ 227) */
-        pw = 227; cols = 3; break;
+    case FMT_15BIT: pw = 256; cols = 4; break;
+    case FMT_8BIT:  pw = 256; cols = 8; break;
+    case FMT_4BIT:  pw = 256; cols = 16; break;
+    case FMT_24BIT: pw = 227; cols = 3; break;
     }
 }
 
@@ -68,7 +67,6 @@ void VramWidget::paintEvent(QPaintEvent *) {
 
     p.drawImage(0, 0, m_image);
 
-    /* Draw texture page highlight */
     if (m_selectedPage >= 0) {
         int cols, rows, pw, ph;
         pageGrid(cols, rows, pw, ph);
@@ -83,6 +81,30 @@ void VramWidget::paintEvent(QPaintEvent *) {
             p.setBrush(QColor(255, 0, 0, 40));
             p.drawRect(x, y, pw, ph);
         }
+    }
+
+    if (m_hasHighlight && m_hlW > 0 && m_hlH > 0) {
+        int px = 0, py = 0, pw = 0, ph = 0;
+        switch (m_format) {
+        case FMT_15BIT:
+            px = m_hlX; py = m_hlY; pw = m_hlW; ph = m_hlH;
+            break;
+        case FMT_8BIT:
+            px = m_hlX * 2; py = m_hlY; pw = m_hlW * 2; ph = m_hlH;
+            break;
+        case FMT_4BIT:
+            px = m_hlX * 4; py = m_hlY; pw = m_hlW * 4; ph = m_hlH;
+            break;
+        case FMT_24BIT:
+            px = m_hlX * 3 / 2; py = m_hlY; pw = m_hlW * 3 / 2; ph = m_hlH;
+            break;
+        }
+
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(Qt::white, 1));
+        p.drawRect(px - 2, py - 2, pw + 3, ph + 3);
+        p.setPen(QPen(Qt::red, 1));
+        p.drawRect(px - 1, py - 1, pw + 1, ph + 1);
     }
 }
 
@@ -142,26 +164,148 @@ VramViewer::VramViewer(QWidget *parent)
     m_pageLabel = new QLabel("Click VRAM to select texture page");
     vbox->addWidget(m_pageLabel);
 
+    /* GPU Event Log group box (collapsible) */
+    m_gpuLogGroup = new QGroupBox("GPU Event Log");
+    m_gpuLogGroup->setCheckable(true);
+    m_gpuLogGroup->setChecked(false);
+    vbox->addWidget(m_gpuLogGroup);
+
+    auto *gpuLogVbox = new QVBoxLayout(m_gpuLogGroup);
+
+    /* Unavailable label (shown when core doesn't support GPU Post) */
+    m_gpuLogUnavail = new QLabel("Core does not support GPU event logging");
+    m_gpuLogUnavail->setStyleSheet("color: grey;");
+    m_gpuLogUnavail->setAlignment(Qt::AlignCenter);
+    m_gpuLogUnavail->hide();
+    gpuLogVbox->addWidget(m_gpuLogUnavail);
+
+    /* Content widget (hidden when collapsed or unavailable) */
+    m_gpuLogContent = new QWidget;
+    gpuLogVbox->addWidget(m_gpuLogContent);
+
+    auto *contentVbox = new QVBoxLayout(m_gpuLogContent);
+    contentVbox->setContentsMargins(0, 0, 0, 0);
+
+    /* Top row: Capture button + memory usage label */
+    auto *captureRow = new QHBoxLayout;
+    m_captureBtn = new QPushButton("Capture");
+    captureRow->addWidget(m_captureBtn);
+    captureRow->addStretch();
+    m_memUsageLabel = new QLabel;
+    captureRow->addWidget(m_memUsageLabel);
+    contentVbox->addLayout(captureRow);
+
+    /* Splitter: event list (left) + event detail (right) */
+    auto *splitter = new QSplitter(Qt::Horizontal);
+
+    m_eventList = new QListWidget;
+    m_eventList->setMinimumWidth(200);
+    splitter->addWidget(m_eventList);
+
+    m_eventDetail = new QTextEdit;
+    m_eventDetail->setReadOnly(true);
+    QFont mono("monospace");
+    mono.setStyleHint(QFont::Monospace);
+    m_eventDetail->setFont(mono);
+    m_eventDetail->setMinimumWidth(200);
+    splitter->addWidget(m_eventDetail);
+
+    splitter->setStretchFactor(0, 1);
+    splitter->setStretchFactor(1, 1);
+    splitter->setMinimumHeight(200);
+    contentVbox->addWidget(splitter, 1);
+
+    /* Bottom row: prev/next frame buttons */
+    auto *navRow = new QHBoxLayout;
+    m_prevFrameBtn = new QPushButton("<- Prev Frame");
+    m_prevFrameBtn->setToolTip("Previous frame boundary (Left arrow)");
+    m_nextFrameBtn = new QPushButton("Next Frame ->");
+    m_nextFrameBtn->setToolTip("Next frame boundary (Right arrow)");
+    navRow->addWidget(m_prevFrameBtn);
+    navRow->addStretch();
+    navRow->addWidget(m_nextFrameBtn);
+    contentVbox->addLayout(navRow);
+
+    /* Start collapsed */
+    m_gpuLogContent->hide();
+
     setWidget(main);
     resize(720, 620);
 
+    /* Connections */
     connect(m_formatGroup, &QButtonGroup::idClicked,
             this, &VramViewer::formatChanged);
     connect(m_vramWidget, &VramWidget::clicked,
             this, &VramViewer::onVramClicked);
+    connect(m_gpuLogGroup, &QGroupBox::toggled,
+            this, &VramViewer::gpuLogToggled);
+    connect(m_captureBtn, &QPushButton::clicked, this, [this]() {
+        if (m_capturing) stopCapture(); else startCapture();
+    });
+    connect(m_eventList, &QListWidget::currentRowChanged,
+            this, &VramViewer::onEventSelected);
+    connect(m_prevFrameBtn, &QPushButton::clicked,
+            this, &VramViewer::prevFrame);
+    connect(m_nextFrameBtn, &QPushButton::clicked,
+            this, &VramViewer::nextFrame);
+
+    auto *scLeft = new QShortcut(Qt::Key_Left, this);
+    connect(scLeft, &QShortcut::activated, this, &VramViewer::prevFrame);
+    auto *scRight = new QShortcut(Qt::Key_Right, this);
+    connect(scRight, &QShortcut::activated, this, &VramViewer::nextFrame);
 
     rebuildImage();
 }
+
+VramViewer::~VramViewer() {
+    if (m_capturing)
+        stopCapture();
+}
+
+/* ======================================================================== */
+/* refresh                                                                   */
+/* ======================================================================== */
 
 void VramViewer::refresh() {
+    /* Lazy check for GPU Post availability */
+    if (!m_gpuLogChecked && ar_has_debug() && ar_content_loaded())
+        checkGpuLogAvailability();
+
+    /* During capture: update memory label, keep VRAM live.
+     * Frame boundaries are inserted by the post-frame hook on the core thread. */
+    if (m_capturing) {
+        m_memUsageLabel->setText(QString("Capture: %1").arg(
+            formatBytes(sys::gpu_capture_compressed_bytes())));
+        rebuildImage();
+        return;
+    }
+
+    /* If group box is checked and we have captured events, preserve captured view */
+    if (m_gpuLogGroup->isChecked() && !m_capturing &&
+        !sys::gpu_capture_events().empty()) {
+        return;
+    }
+
     rebuildImage();
 }
+
+/* ======================================================================== */
+/* Format / click handlers                                                   */
+/* ======================================================================== */
 
 void VramViewer::formatChanged(int id) {
     m_format = (VramWidget::Format)id;
     m_vramWidget->setFormat(m_format);
     m_vramWidget->setSelectedPage(-1);
     m_pageLabel->setText("Click VRAM to select texture page");
+
+    /* If viewing captured data, re-render from capture buffer */
+    if (m_gpuLogGroup->isChecked() && !sys::gpu_capture_events().empty() &&
+        !m_captureVram.empty()) {
+        rebuildImageFromBuffer(m_captureVram.data());
+        return;
+    }
+
     rebuildImage();
 }
 
@@ -179,9 +323,6 @@ void VramViewer::onVramClicked(int x, int y) {
     int page = pageRow * cols + pageCol;
     m_vramWidget->setSelectedPage(page);
 
-    /* Compute VRAM halfword address of the page origin.
-     * Each page starts at (page_x_hw, page_y_line).
-     * page_x_hw depends on format. */
     unsigned page_x_hw = 0;
     switch (m_format) {
     case VramWidget::FMT_15BIT: page_x_hw = pageCol * 256; break;
@@ -197,26 +338,72 @@ void VramViewer::onVramClicked(int x, int y) {
         .arg(QString::number(hw_addr, 16).toUpper()));
 }
 
-void VramViewer::rebuildImage() {
-    if (!ar_has_debug() || !ar_content_loaded()) return;
+/* ======================================================================== */
+/* GPU Event Log group box toggle                                            */
+/* ======================================================================== */
 
-    /* Find VRAM memory region */
-    m_vramMem = ar_find_memory_by_id("vram");
-    if (!m_vramMem) return;
+void VramViewer::gpuLogToggled(bool checked) {
+    if (checked) {
+        if (!m_gpuLogChecked && ar_has_debug() && ar_content_loaded())
+            checkGpuLogAvailability();
 
-    /* VRAM is 1024 halfwords wide × 512 lines = 1MB byte-addressed.
-     * Read into a local buffer for fast access. */
-    constexpr int VRAM_BYTES = 1048576;
-    constexpr int VRAM_HW_W = 1024;
-    constexpr int VRAM_H = 512;
+        if (m_gpuLogAvailable) {
+            m_gpuLogContent->show();
+            m_gpuLogUnavail->hide();
+        } else {
+            m_gpuLogContent->hide();
+            m_gpuLogUnavail->show();
+        }
+    } else {
+        m_gpuLogContent->hide();
+        m_gpuLogUnavail->hide();
+        rebuildImage();
+    }
+}
 
-    /* Read all VRAM bytes into a local buffer (faster than per-pixel peek) */
-    QByteArray vramBuf(VRAM_BYTES, 0);
-    uint8_t *vram = reinterpret_cast<uint8_t *>(vramBuf.data());
+/* ======================================================================== */
+/* Check GPU Post breakpoint availability                                    */
+/* ======================================================================== */
+
+void VramViewer::checkGpuLogAvailability() {
+    m_gpuLogChecked = true;
+    m_gpuLogAvailable = false;
+
+    rd_System const *sys = ar_debug_system();
+    if (!sys) return;
+
+    for (unsigned i = 0; i < sys->v1.num_break_points; i++) {
+        const char *desc = sys->v1.break_points[i]->v1.description;
+        if (strcmp(desc, "GPU Post") == 0) {
+            m_gpuLogAvailable = true;
+            break;
+        }
+    }
+
+    if (m_gpuLogGroup->isChecked()) {
+        m_gpuLogContent->setVisible(m_gpuLogAvailable);
+        m_gpuLogUnavail->setVisible(!m_gpuLogAvailable);
+    }
+}
+
+/* ======================================================================== */
+/* VRAM read helpers                                                         */
+/* ======================================================================== */
+
+void VramViewer::readLiveVram(std::vector<uint8_t> &buf) {
+    if (!m_vramMem) {
+        m_vramMem = ar_find_memory_by_id("vram");
+        if (!m_vramMem) return;
+    }
+    buf.resize(VRAM_BYTES);
+    if (m_vramMem->v1.peek_range &&
+        m_vramMem->v1.peek_range(m_vramMem, 0, VRAM_BYTES, buf.data()))
+        return;
     for (int i = 0; i < VRAM_BYTES; i++)
-        vram[i] = m_vramMem->v1.peek(m_vramMem, i, false);
+        buf[i] = m_vramMem->v1.peek(m_vramMem, i, false);
+}
 
-    /* Helper: read halfword at (hw_x, line) */
+void VramViewer::rebuildImageFromBuffer(const uint8_t *vram) {
     auto hw = [&](int hw_x, int line) -> uint16_t {
         int byte_addr = (line * VRAM_HW_W + hw_x) * 2;
         if (byte_addr + 1 >= VRAM_BYTES) return 0;
@@ -227,7 +414,6 @@ void VramViewer::rebuildImage() {
 
     switch (m_format) {
     case VramWidget::FMT_15BIT: {
-        /* 1024 x 512, RGB555 — 1 pixel per halfword */
         img = QImage(VRAM_HW_W, VRAM_H, QImage::Format_RGB32);
         for (int y = 0; y < VRAM_H; y++) {
             auto *scanline = reinterpret_cast<uint32_t *>(img.scanLine(y));
@@ -242,8 +428,7 @@ void VramViewer::rebuildImage() {
         break;
     }
     case VramWidget::FMT_24BIT: {
-        /* 682 x 512, RGB888 packed — 3 bytes per pixel, 2 pixels per 3 halfwords */
-        int imgW = (VRAM_HW_W * 2) / 3; // 682
+        int imgW = (VRAM_HW_W * 2) / 3;
         img = QImage(imgW, VRAM_H, QImage::Format_RGB32);
         for (int y = 0; y < VRAM_H; y++) {
             auto *scanline = reinterpret_cast<uint32_t *>(img.scanLine(y));
@@ -260,8 +445,7 @@ void VramViewer::rebuildImage() {
         break;
     }
     case VramWidget::FMT_8BIT: {
-        /* 2048 x 512, 8-bit indexed — shown as grayscale */
-        int imgW = VRAM_HW_W * 2; // 2048
+        int imgW = VRAM_HW_W * 2;
         img = QImage(imgW, VRAM_H, QImage::Format_RGB32);
         for (int y = 0; y < VRAM_H; y++) {
             auto *scanline = reinterpret_cast<uint32_t *>(img.scanLine(y));
@@ -276,8 +460,7 @@ void VramViewer::rebuildImage() {
         break;
     }
     case VramWidget::FMT_4BIT: {
-        /* 4096 x 512, 4-bit indexed — shown as grayscale (0-15 scaled to 0-255) */
-        int imgW = VRAM_HW_W * 4; // 4096
+        int imgW = VRAM_HW_W * 4;
         img = QImage(imgW, VRAM_H, QImage::Format_RGB32);
         for (int y = 0; y < VRAM_H; y++) {
             auto *scanline = reinterpret_cast<uint32_t *>(img.scanLine(y));
@@ -290,7 +473,7 @@ void VramViewer::rebuildImage() {
                     nibble = (vram[byteOff] >> 4) & 0x0F;
                 else
                     nibble = vram[byteOff] & 0x0F;
-                uint8_t v = nibble * 17; // 0→0, 15→255
+                uint8_t v = nibble * 17;
                 scanline[px] = 0xFF000000 | (v << 16) | (v << 8) | v;
             }
         }
@@ -300,4 +483,222 @@ void VramViewer::rebuildImage() {
 
     m_vramWidget->setFormat(m_format);
     m_vramWidget->setImage(img);
+}
+
+void VramViewer::rebuildImage() {
+    m_vramWidget->clearHighlightRect();
+    if (!ar_has_debug() || !ar_content_loaded()) return;
+
+    m_vramMem = ar_find_memory_by_id("vram");
+    if (!m_vramMem) return;
+
+    std::vector<uint8_t> buf(VRAM_BYTES);
+    if (!m_vramMem->v1.peek_range ||
+        !m_vramMem->v1.peek_range(m_vramMem, 0, VRAM_BYTES, buf.data())) {
+        for (int i = 0; i < VRAM_BYTES; i++)
+            buf[i] = m_vramMem->v1.peek(m_vramMem, i, false);
+    }
+
+    rebuildImageFromBuffer(buf.data());
+}
+
+/* ======================================================================== */
+/* Capture start / stop                                                      */
+/* ======================================================================== */
+
+void VramViewer::startCapture() {
+    if (!ar_has_debug() || !ar_content_loaded()) return;
+
+    rd_DebuggerIf *dif = ar_get_debugger_if();
+    if (!dif) return;
+
+    if (!sys::gpu_capture_start(dif)) return;
+
+    m_capturing = true;
+    m_captureBtn->setText("End Capture");
+    m_eventList->setEnabled(false);
+    m_eventDetail->setEnabled(false);
+    m_prevFrameBtn->setEnabled(false);
+    m_nextFrameBtn->setEnabled(false);
+    m_memUsageLabel->setText("Capture: 0 bytes");
+}
+
+void VramViewer::stopCapture() {
+    m_capturing = false;
+
+    rd_DebuggerIf *dif = ar_get_debugger_if();
+    sys::gpu_capture_stop(dif);
+
+    m_captureBtn->setText("Capture");
+    m_eventList->setEnabled(true);
+    m_eventDetail->setEnabled(true);
+    m_prevFrameBtn->setEnabled(true);
+    m_nextFrameBtn->setEnabled(true);
+
+    m_memUsageLabel->setText(QString("Capture: %1").arg(
+        formatBytes(sys::gpu_capture_compressed_bytes())));
+
+    populateEventList();
+}
+
+/* ======================================================================== */
+/* Populate event list after capture                                         */
+/* ======================================================================== */
+
+void VramViewer::populateEventList() {
+    m_eventList->clear();
+
+    const auto &events = sys::gpu_capture_events();
+    for (unsigned i = 0; i < events.size(); i++) {
+        const auto &ev = events[i];
+
+        if (ev.type == sys::GpuCapEvent::FRAME_BOUNDARY) {
+            m_eventList->addItem(QString("Frame %1").arg(ev.frame_number));
+            continue;
+        }
+
+        if (ev.word_count == 0 && i == 0) {
+            m_eventList->addItem("(initial VRAM)");
+            continue;
+        }
+
+        char line[256];
+        if (ev.port == 0)
+            sys::decode_gp0(line, sizeof(line), ev.words, ev.word_count);
+        else
+            sys::decode_gp1(line, sizeof(line), ev.words);
+
+        auto *item = new QListWidgetItem(QString::fromUtf8(line));
+        if (ev.diff.empty())
+            item->setForeground(Qt::gray);
+        m_eventList->addItem(item);
+    }
+
+    if (!events.empty())
+        m_eventList->setCurrentRow(0);
+}
+
+/* ======================================================================== */
+/* Event selection                                                           */
+/* ======================================================================== */
+
+void VramViewer::onEventSelected(int row) {
+    const auto &events = sys::gpu_capture_events();
+
+    if (row < 0 || (unsigned)row >= events.size()) {
+        m_eventDetail->clear();
+        return;
+    }
+
+    const auto &ev = events[row];
+
+    QString detail;
+    if (ev.type == sys::GpuCapEvent::FRAME_BOUNDARY) {
+        detail = QString("Frame boundary %1").arg(ev.frame_number);
+    } else {
+        char line[256];
+        if (ev.word_count > 0) {
+            if (ev.port == 0)
+                sys::decode_gp0(line, sizeof(line), ev.words, ev.word_count);
+            else
+                sys::decode_gp1(line, sizeof(line), ev.words);
+            detail = QString::fromUtf8(line) + "\n";
+        }
+
+        const char *src_name = (ev.source == 0) ? "CPU" :
+                               (ev.source == 2) ? "DMA2" : "?";
+        detail += QString("Source: %1  PC: %2\n")
+            .arg(src_name)
+            .arg(ev.pc, 8, 16, QChar('0')).toUpper();
+
+        /* Decoded parameters (vertices, texcoords, colors) */
+        if (ev.word_count > 0 && ev.port == 0) {
+            char det[1024];
+            sys::decode_gp0_detail(det, sizeof(det), ev.words, ev.word_count);
+            if (det[0])
+                detail += "\n" + QString::fromUtf8(det);
+        }
+
+        if (ev.word_count > 0) {
+            detail += "\nRaw:";
+            for (unsigned i = 0; i < ev.word_count; i++) {
+                detail += QString(" %1").arg(ev.words[i], 8, 16, QChar('0')).toUpper();
+                if (i < ev.word_count - 1 && ((i + 1) % 4) == 0)
+                    detail += "\n    ";
+            }
+            detail += "\n";
+        }
+
+        if (!ev.diff.empty())
+            detail += QString("\nDiff: %1").arg(formatBytes(ev.diff.size()));
+        if (ev.is_keyframe)
+            detail += " (keyframe)";
+    }
+
+    m_eventDetail->setPlainText(detail);
+
+    if (ev.diff_w > 0 && ev.diff_h > 0)
+        m_vramWidget->setHighlightRect(ev.diff_x, ev.diff_y, ev.diff_w, ev.diff_h);
+    else
+        m_vramWidget->clearHighlightRect();
+
+    seekToEvent((unsigned)row);
+}
+
+/* ======================================================================== */
+/* Seek to event — reconstruct VRAM via capture module                       */
+/* ======================================================================== */
+
+void VramViewer::seekToEvent(unsigned idx) {
+    m_captureVram.resize(VRAM_BYTES);
+    if (!sys::gpu_capture_reconstruct(idx, m_captureVram.data()))
+        return;
+    rebuildImageFromBuffer(m_captureVram.data());
+}
+
+/* ======================================================================== */
+/* Prev / Next Frame navigation                                              */
+/* ======================================================================== */
+
+void VramViewer::prevFrame() {
+    const auto &events = sys::gpu_capture_events();
+    int cur = m_eventList->currentRow();
+    if (cur < 0) cur = (int)events.size();
+
+    for (int i = cur - 1; i >= 0; i--) {
+        if (events[i].type == sys::GpuCapEvent::FRAME_BOUNDARY) {
+            m_eventList->setCurrentRow(i);
+            return;
+        }
+    }
+    if (!events.empty())
+        m_eventList->setCurrentRow(0);
+}
+
+void VramViewer::nextFrame() {
+    const auto &events = sys::gpu_capture_events();
+    int cur = m_eventList->currentRow();
+
+    for (unsigned i = (unsigned)(cur + 1); i < events.size(); i++) {
+        if (events[i].type == sys::GpuCapEvent::FRAME_BOUNDARY) {
+            m_eventList->setCurrentRow((int)i);
+            return;
+        }
+    }
+    if (!events.empty())
+        m_eventList->setCurrentRow((int)events.size() - 1);
+}
+
+/* ======================================================================== */
+/* Utility                                                                   */
+/* ======================================================================== */
+
+QString VramViewer::formatBytes(size_t bytes) {
+    if (bytes >= 1024ULL * 1024 * 1024)
+        return QString("%1 GiB").arg((double)bytes / (1024.0 * 1024.0 * 1024.0), 0, 'f', 1);
+    if (bytes >= 1024 * 1024)
+        return QString("%1 MiB").arg((double)bytes / (1024.0 * 1024.0), 0, 'f', 1);
+    if (bytes >= 10000)
+        return QString("%1 KiB").arg((double)bytes / 1024.0, 0, 'f', 1);
+    return QString("%1 bytes").arg(bytes);
 }

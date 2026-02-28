@@ -12,6 +12,8 @@ std::vector<Instruction> dis_lr35902(std::span<const uint8_t> data,
                                      uint64_t base_addr, uint32_t flags);
 std::vector<Instruction> dis_6502(std::span<const uint8_t> data,
                                   uint64_t base_addr, uint32_t flags);
+std::vector<Instruction> dis_r3000a(std::span<const uint8_t> data,
+                                    uint64_t base_addr, uint32_t flags);
 
 // Forward declarations for arch-specific layout/trace data
 extern const RegLayoutEntry lr35902_reg_layout[];
@@ -22,6 +24,11 @@ extern const unsigned lr35902_num_trace_regs;
 extern const RegLayoutEntry mos6502_reg_layout[];
 extern const unsigned mos6502_num_reg_layout;
 
+extern const RegLayoutEntry r3000a_reg_layout[];
+extern const unsigned r3000a_num_reg_layout;
+extern const TraceReg r3000a_trace_regs[];
+extern const unsigned r3000a_num_trace_regs;
+
 struct ArchEntry {
     Arch arch;
     std::vector<Instruction> (*disassemble_fn)(std::span<const uint8_t>,
@@ -31,12 +38,16 @@ struct ArchEntry {
 static const ArchEntry arch_table[] = {
     { { RD_CPU_LR35902, 3, 1,
         lr35902_reg_layout, lr35902_num_reg_layout,
-        lr35902_trace_regs, lr35902_num_trace_regs },
+        lr35902_trace_regs, lr35902_num_trace_regs, 0 },
       dis_lr35902 },
     { { RD_CPU_6502, 3, 1,
         mos6502_reg_layout, mos6502_num_reg_layout,
-        nullptr, 0 },
+        nullptr, 0, 0 },
       dis_6502 },
+    { { RD_CPU_R3000A, 4, 4,
+        r3000a_reg_layout, r3000a_num_reg_layout,
+        r3000a_trace_regs, r3000a_num_trace_regs, 1 },
+      dis_r3000a },
 };
 
 const Arch *arch_for_cpu(unsigned cpu_type)

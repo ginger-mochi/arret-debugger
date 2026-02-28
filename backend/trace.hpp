@@ -58,6 +58,14 @@ bool ar_trace_get_registers(void);
 void ar_trace_set_indent(bool enable);
 bool ar_trace_get_indent(void);
 
+/* System-specific trace options (driven by sys::TraceOption).
+ * Options are identified by index (0-based).
+ * Settings persist across trace sessions. */
+unsigned ar_trace_sys_option_count(void);
+const char *ar_trace_sys_option_label(unsigned idx);
+void ar_trace_sys_option_enable(unsigned idx, bool enable);
+bool ar_trace_sys_option_enabled(unsigned idx);
+
 /* Get the trace file path (empty string if none). */
 const char *ar_trace_file_path(void);
 

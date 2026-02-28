@@ -21,6 +21,7 @@
 #include "trace.hpp"
 #include "backend.hpp"
 #include "arch.hpp"
+#include "sys.hpp"
 #include "registers.hpp"
 
 /* ========================================================================
@@ -79,6 +80,11 @@ static rd_SubscriptionID g_int_sub_id = -1;
 
 /* Persistent CPU settings (survive across trace sessions) */
 static std::unordered_map<std::string, bool> g_cpu_settings;
+
+/* System-specific trace options */
+static const sys::Sys *g_sys_desc = nullptr;
+static std::vector<bool> g_sys_option_enabled;   /* persistent settings */
+static std::vector<bool> g_sys_option_active;     /* currently subscribed */
 
 /* ========================================================================
  * Memory map cache (for bank display)
@@ -144,6 +150,59 @@ static int64_t bank_for_addr(const CpuMMap &cm, uint64_t addr) {
 }
 
 /* ========================================================================
+ * Sys trace option log sink
+ * ======================================================================== */
+
+static void sys_trace_log(const char *line) {
+    ring_write(line);
+    if (g_file) {
+        fputs(line, g_file);
+        fputc('\n', g_file);
+    }
+}
+
+/* ========================================================================
+ * Sys trace option management
+ * ======================================================================== */
+
+static void sync_sys_options(void) {
+    rd_DebuggerIf *dif = ar_get_debugger_if();
+    if (!g_sys_desc || !dif) return;
+
+    for (unsigned i = 0; i < g_sys_desc->num_trace_options; i++) {
+        bool want = g_active && i < g_sys_option_enabled.size()
+                    && g_sys_option_enabled[i];
+        bool have = i < g_sys_option_active.size() && g_sys_option_active[i];
+
+        if (want && !have) {
+            if (g_sys_desc->trace_option_start &&
+                g_sys_desc->trace_option_start(i, dif, sys_trace_log)) {
+                if (i >= g_sys_option_active.size())
+                    g_sys_option_active.resize(i + 1, false);
+                g_sys_option_active[i] = true;
+            }
+        } else if (!want && have) {
+            if (g_sys_desc->trace_option_stop)
+                g_sys_desc->trace_option_stop(i, dif);
+            g_sys_option_active[i] = false;
+        }
+    }
+}
+
+static void stop_all_sys_options(void) {
+    rd_DebuggerIf *dif = ar_get_debugger_if();
+    if (!g_sys_desc) return;
+
+    for (unsigned i = 0; i < g_sys_option_active.size(); i++) {
+        if (g_sys_option_active[i]) {
+            if (g_sys_desc->trace_option_stop && dif)
+                g_sys_desc->trace_option_stop(i, dif);
+            g_sys_option_active[i] = false;
+        }
+    }
+}
+
+/* ========================================================================
  * Subscription management
  * ======================================================================== */
 
@@ -206,6 +265,16 @@ static void populate_cpus(void) {
 
     rd_System const *sys = ar_debug_system();
     if (!sys) return;
+
+    /* Resolve system descriptor for sys-specific trace options */
+    g_sys_desc = sys->v1.description
+                 ? sys::sys_for_desc(sys->v1.description) : nullptr;
+    if (g_sys_desc) {
+        /* Ensure enabled vector is sized (preserves existing settings) */
+        if (g_sys_option_enabled.size() < g_sys_desc->num_trace_options)
+            g_sys_option_enabled.resize(g_sys_desc->num_trace_options, false);
+        g_sys_option_active.resize(g_sys_desc->num_trace_options, false);
+    }
 
     for (unsigned i = 0; i < sys->v1.num_cpus; i++) {
         rd_Cpu const *cpu = sys->v1.cpus[i];
@@ -275,6 +344,7 @@ bool ar_trace_start(const char *path) {
     populate_cpus();
     g_active = true;
     sync_subscriptions();
+    sync_sys_options();
 
     if (g_file)
         fprintf(stderr, "[arret] trace: started (file: %s)\n", g_file_path);
@@ -287,6 +357,7 @@ bool ar_trace_start(const char *path) {
 void ar_trace_stop(void) {
     if (!g_active) return;
 
+    stop_all_sys_options();
     g_active = false;
     sync_subscriptions();
 
@@ -403,21 +474,52 @@ uint64_t ar_trace_total_lines(void) {
 
 bool ar_trace_is_sub(rd_SubscriptionID sub_id) {
     if (sub_id == g_int_sub_id && g_int_sub_id >= 0) return true;
-    return g_sub_to_cpu.find(sub_id) != g_sub_to_cpu.end();
+    if (g_sub_to_cpu.find(sub_id) != g_sub_to_cpu.end()) return true;
+    if (g_sys_desc && g_sys_desc->trace_option_is_sub &&
+        g_sys_desc->trace_option_is_sub(sub_id))
+        return true;
+    return false;
 }
 
 bool ar_trace_on_event(rd_SubscriptionID sub_id, rd_Event const *event) {
+    /* Route to system-specific trace handler */
+    if (g_sys_desc && g_sys_desc->trace_option_is_sub &&
+        g_sys_desc->trace_option_is_sub(sub_id)) {
+        if (g_sys_desc->trace_option_on_event)
+            g_sys_desc->trace_option_on_event(sub_id, event);
+        return false;
+    }
+
     /* Handle interrupt events */
     if (event->type == RD_EVENT_INTERRUPT) {
         if (sub_id != g_int_sub_id) return false;
 
         const rd_InterruptEvent &intr = event->interrupt;
+
+        /* Resolve interrupt name from system descriptor */
+        const char *int_name = nullptr;
+        rd_System const *sys = ar_debug_system();
+        if (sys && sys->v1.description) {
+            const sys::Sys *sd = sys::sys_for_desc(sys->v1.description);
+            if (sd && (unsigned)intr.kind < sd->num_int_names)
+                int_name = sd->int_names[intr.kind];
+        }
+
         char line[TRACE_LINE_SIZE];
-        snprintf(line, sizeof(line), "--- IRQ cpu=%s kind=%d ret=%lX vec=%lX",
-                 intr.cpu ? intr.cpu->v1.id : "?",
-                 intr.kind,
-                 (unsigned long)intr.return_address,
-                 (unsigned long)intr.vector_address);
+        if (int_name)
+            snprintf(line, sizeof(line),
+                     "--- IRQ cpu=%s kind=%d (%s) ret=%lX vec=%lX",
+                     intr.cpu ? intr.cpu->v1.id : "?",
+                     intr.kind, int_name,
+                     (unsigned long)intr.return_address,
+                     (unsigned long)intr.vector_address);
+        else
+            snprintf(line, sizeof(line),
+                     "--- IRQ cpu=%s kind=%d ret=%lX vec=%lX",
+                     intr.cpu ? intr.cpu->v1.id : "?",
+                     intr.kind,
+                     (unsigned long)intr.return_address,
+                     (unsigned long)intr.vector_address);
 
         ring_write(line);
         if (g_file) {
@@ -561,4 +663,39 @@ bool ar_trace_on_event(rd_SubscriptionID sub_id, rd_Event const *event) {
     }
 
     return false;  /* never halt */
+}
+
+/* ========================================================================
+ * System-specific trace options
+ * ======================================================================== */
+
+unsigned ar_trace_sys_option_count(void) {
+    /* Resolve sys descriptor lazily if not yet set */
+    if (!g_sys_desc) {
+        rd_System const *sys = ar_debug_system();
+        if (sys && sys->v1.description)
+            g_sys_desc = sys::sys_for_desc(sys->v1.description);
+    }
+    if (!g_sys_desc) return 0;
+    return g_sys_desc->num_trace_options;
+}
+
+const char *ar_trace_sys_option_label(unsigned idx) {
+    if (!g_sys_desc || idx >= g_sys_desc->num_trace_options) return nullptr;
+    return g_sys_desc->trace_options[idx].label;
+}
+
+void ar_trace_sys_option_enable(unsigned idx, bool enable) {
+    if (idx >= g_sys_option_enabled.size())
+        g_sys_option_enabled.resize(idx + 1, false);
+    g_sys_option_enabled[idx] = enable;
+
+    /* If tracing is active, start/stop immediately */
+    if (g_active)
+        sync_sys_options();
+}
+
+bool ar_trace_sys_option_enabled(unsigned idx) {
+    if (idx >= g_sys_option_enabled.size()) return false;
+    return g_sys_option_enabled[idx];
 }

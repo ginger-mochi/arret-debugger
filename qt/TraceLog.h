@@ -27,6 +27,7 @@ private slots:
 
 private:
     void populateCpus();
+    void populateSysOptions();
     void updateUI();
 
     QPlainTextEdit *m_logView;
@@ -37,6 +38,7 @@ private:
     QCheckBox      *m_indentCheck;
     QPushButton    *m_startBtn;
     QLabel         *m_lineCount;
+    QLabel         *m_cpuLabel;
     QVBoxLayout    *m_cpuLayout;
 
     struct CpuCheck {
@@ -45,6 +47,15 @@ private:
     };
     QVector<CpuCheck> m_cpuChecks;
     bool m_cpusPopulated = false;
+
+    QVBoxLayout    *m_sysOptLayout;
+    QLabel         *m_sysOptLabel;
+    struct SysOptCheck {
+        unsigned idx;
+        QCheckBox *check;
+    };
+    QVector<SysOptCheck> m_sysOptChecks;
+    bool m_sysOptsPopulated = false;
 };
 
 #endif // TRACELOG_H

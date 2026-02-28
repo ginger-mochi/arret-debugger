@@ -10,16 +10,13 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #define RD_API_VERSION 1
 
 /* Watchpoint operations */
 #define RD_MEMORY_READ (1 << 0)
 #define RD_MEMORY_WRITE (1 << 1)
-
-/* IO watchpoint operations */
-#define RD_IO_READ (1 << 0)
-#define RD_IO_WRITE (1 << 1)
 
 /* Event types */
 typedef enum {
@@ -28,8 +25,7 @@ typedef enum {
     RD_EVENT_INTERRUPT = 2,
     RD_EVENT_MEMORY = 3,
     RD_EVENT_REG = 4,
-    RD_EVENT_IO = 5,
-    RD_EVENT_MISC = 6
+    RD_EVENT_MISC = 5
 }
 rd_EventType;
 
@@ -112,6 +108,16 @@ struct rd_Memory {
          * poke must never cause memory subscriptions to fire. */
         int (*poke)(struct rd_Memory const* self, uint64_t address, uint8_t value);
 
+        /* Optional. If peek_range is present, peek must also be present.
+           Reads a range of values. Does not cause side effects.
+           Returns true on success. */
+        bool (*peek_range)(struct rd_Memory const* self, uint64_t address, uint64_t size, uint8_t* outbuff);
+        
+        /* Optional. If poke_range is present, poke must also be present.
+           Writes a range of values. Does not cause side effects.
+           Returns true on success. */
+        bool (*poke_range)(struct rd_Memory const* self, uint64_t address, uint64_t size, uint8_t const* buff);
+
         /*
          * Optional memory map.  Both pointers must be non-NULL or both NULL.
          * The caller allocates the array using the count returned by
@@ -144,9 +150,15 @@ typedef struct rd_Cpu {
         rd_MiscBreakpoint const* const* break_points;
         unsigned num_break_points;
 
-        /* Registers, return true on set_register to signal a successful write */
+        /* CPU Registers; return 1 on set_register to signal a successful write */
         uint64_t (*get_register)(struct rd_Cpu const* self, unsigned reg);
         int (*set_register)(struct rd_Cpu const* self, unsigned reg, uint64_t value);
+
+        /* Optional; used for pipelined CPUs like MIPS.
+           Returns where the PC is expected to be after n delay slots.
+           if delay=0, should generally return the current PC value.
+           Returns false if failed to calculate or slot out of range. */
+        bool (*pipeline_get_delay_pc)(struct rd_Cpu const* self, unsigned delay, uint64_t* out_pc);
     }
     v1;
 }
@@ -218,19 +230,11 @@ typedef struct rd_RegisterWatchpointEvent {
 }
 rd_RegisterWatchpointEvent;
 
-/* Informs the front-end that an IO port is about to be read from or written to */
-typedef struct rd_IoWatchpointEvent {
-    rd_Cpu const* cpu;
-    uint64_t address;
-    uint8_t operation;
-    uint64_t value;
-}
-rd_IoWatchpointEvent;
-
 /* Informs the front-end that a misc breakpoint was hit */
 typedef struct rd_MiscBreakpointEvent {
     rd_MiscBreakpoint const* breakpoint;
-    uint64_t args[4];
+    void const* data;
+    size_t data_size;
 }
 rd_MiscBreakpointEvent;
 
@@ -253,7 +257,6 @@ typedef struct rd_Event {
         rd_InterruptEvent interrupt;
         rd_MemoryWatchpointEvent memory;
         rd_RegisterWatchpointEvent reg;
-        rd_IoWatchpointEvent io;
         rd_MiscBreakpointEvent misc;
     };
 }
@@ -298,15 +301,6 @@ typedef struct rd_RegisterWatchpointSubscription {
 }
 rd_RegisterWatchpointSubscription;
 
-/* Tells the core to report when an IO port is accessed  */
-typedef struct rd_IoWatchpointSubscription {
-    rd_Cpu const* cpu;
-    uint64_t address_range_begin;
-    uint64_t address_range_end;
-    uint8_t operation;
-}
-rd_IoWatchpointSubscription;
-
 /* Tells the core to report a misc breakpoint event */
 typedef struct rd_MiscBreakpointSubscription {
     rd_MiscBreakpoint const* breakpoint;
@@ -322,7 +316,6 @@ typedef struct rd_Subscription {
         rd_InterruptSubscription interrupt;
         rd_MemoryWatchpointSubscription memory;
         rd_RegisterWatchpointSubscription reg;
-        rd_IoWatchpointSubscription io;
         rd_MiscBreakpointSubscription misc;
     };
 }

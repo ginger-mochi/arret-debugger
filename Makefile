@@ -1,7 +1,7 @@
 CXX      ?= g++
 BUILDDIR := build
 CXXFLAGS := -Wall -Wextra -O2 -g -Iinclude -Ibackend -I$(BUILDDIR) -std=c++20
-LDFLAGS  := -ldl -lm
+LDFLAGS  := -ldl -lm -lz
 
 BACKEND_SRCS := $(wildcard backend/*.cpp backend/**/*.cpp)
 HEADERS      := $(wildcard include/*.h) $(wildcard backend/*.hpp)
@@ -70,6 +70,9 @@ $(BUILDDIR)/arch_%.o: backend/arch/%.cpp $(HEADERS) | $(BUILDDIR)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 $(BUILDDIR)/gb_%.o: backend/gb/%.cpp $(HEADERS) | $(BUILDDIR)
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+$(BUILDDIR)/sys_%.o: backend/sys/%.cpp $(HEADERS) | $(BUILDDIR)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 # ========== SDL frontend ==========
