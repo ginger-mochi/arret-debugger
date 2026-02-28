@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 
+struct rd_Cpu;
+
 namespace arch {
 
 struct Instruction {
@@ -53,6 +55,28 @@ struct TraceReg {
     unsigned bits;              // register width in bits
 };
 
+/* ---- Stack trace types ---- */
+
+struct StackFrame {
+    uint64_t pc;            // Return address (caller's PC)
+    uint64_t sp;            // Stack pointer at this frame
+    uint64_t func_addr;     // Estimated function start (UINT64_MAX if unknown)
+};
+
+enum class StackTraceStatus {
+    OK,                     // Completed normally (hit end of chain)
+    MAX_DEPTH,              // Hit max_depth limit
+    SCAN_LIMIT,             // Couldn't find function prologue within scan window
+    INVALID_SP,             // SP invalid or moved wrong direction
+    INVALID_RA,             // RA pointed somewhere absurd
+    READ_ERROR,             // Memory read failed
+};
+
+struct StackTrace {
+    std::vector<StackFrame> frames;
+    StackTraceStatus        status;
+};
+
 /* ---- Architecture descriptor ---- */
 
 struct Arch {
@@ -64,6 +88,11 @@ struct Arch {
     const TraceReg *trace_regs;         // NULL = log all registers
     unsigned num_trace_regs;
     unsigned branch_delay_slots;    // 0 = no delay slot; 1 = MIPS-style (branch takes effect after next insn)
+
+    // Stack trace support (NULL if not supported for this arch)
+    const char *const *calling_conventions;  // nullptr-terminated list; first is default
+    StackTrace (*stack_trace_fn)(rd_Cpu const *cpu, unsigned max_depth,
+                                 unsigned cc_index);
 };
 
 const Arch *arch_for_cpu(unsigned cpu_type);
@@ -73,6 +102,10 @@ std::vector<Instruction> disassemble(
     uint64_t base_addr,
     unsigned cpu_type,
     uint32_t flags = 0);
+
+std::span<const char *const> stack_trace_conventions(unsigned cpu_type);
+StackTrace stack_trace(rd_Cpu const *cpu, unsigned max_depth = 64,
+                       unsigned cc_index = 0);
 
 } // namespace arch
 

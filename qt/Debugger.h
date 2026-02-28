@@ -29,9 +29,11 @@ private:
 
     class DisasmView;
     class RegistersPane;
+    class StackTracePane;
 
     DisasmView      *m_disasm;
     RegistersPane   *m_regs;
+    StackTracePane  *m_stackTrace;
     QComboBox       *m_cpuCombo;
     QAction         *m_goToAction = nullptr;
 

@@ -20,6 +20,7 @@
 #include <QLabel>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QListWidget>
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
@@ -1365,6 +1366,87 @@ private:
 };
 
 /* ======================================================================== */
+/* StackTracePane                                                            */
+/* ======================================================================== */
+
+class Debugger::StackTracePane : public QWidget {
+public:
+    explicit StackTracePane(std::function<void(uint64_t)> navigateCb,
+                            QWidget *parent = nullptr)
+        : QWidget(parent), m_navigateCb(std::move(navigateCb))
+    {
+        auto *layout = new QVBoxLayout(this);
+        layout->setContentsMargins(4, 4, 4, 4);
+
+        auto *label = new QLabel("Stack Trace", this);
+        layout->addWidget(label);
+
+        m_list = new QListWidget(this);
+        QFont mono("Monospace", 10);
+        mono.setStyleHint(QFont::Monospace);
+        m_list->setFont(mono);
+        layout->addWidget(m_list);
+
+        connect(m_list, &QListWidget::itemClicked, this,
+                [this](QListWidgetItem *item) {
+            quint64 pc = item->data(Qt::UserRole).toULongLong();
+            if (pc != UINT64_MAX && m_navigateCb)
+                m_navigateCb(pc);
+        });
+    }
+
+    void setCpu(rd_Cpu const *cpu) {
+        m_cpu = cpu;
+        if (!cpu) {
+            hide();
+            return;
+        }
+        auto *a = arch::arch_for_cpu(cpu->v1.type);
+        if (!a || !a->stack_trace_fn) {
+            hide();
+            return;
+        }
+        m_hexDigits = ar_reg_digits(cpu->v1.type, (unsigned)ar_reg_pc(cpu->v1.type));
+        show();
+    }
+
+    void refresh() {
+        m_list->clear();
+        if (!m_cpu || !isVisible()) return;
+
+        auto trace = arch::stack_trace(m_cpu);
+
+        for (auto &frame : trace.frames) {
+            auto *item = new QListWidgetItem(
+                QString("0x%1").arg(frame.pc, m_hexDigits, 16, QChar('0')).toUpper(),
+                m_list);
+            item->setData(Qt::UserRole, QVariant::fromValue<quint64>(frame.pc));
+        }
+
+        if (trace.status != arch::StackTraceStatus::OK) {
+            const char *msg = nullptr;
+            switch (trace.status) {
+            case arch::StackTraceStatus::MAX_DEPTH:  msg = "max depth reached"; break;
+            case arch::StackTraceStatus::SCAN_LIMIT:  msg = "scan limit"; break;
+            case arch::StackTraceStatus::INVALID_SP:  msg = "invalid SP"; break;
+            case arch::StackTraceStatus::INVALID_RA:  msg = "invalid RA"; break;
+            case arch::StackTraceStatus::READ_ERROR:  msg = "read error"; break;
+            default: msg = "unknown error"; break;
+            }
+            auto *item = new QListWidgetItem(msg, m_list);
+            item->setForeground(Qt::red);
+            item->setData(Qt::UserRole, QVariant::fromValue<quint64>(UINT64_MAX));
+        }
+    }
+
+private:
+    std::function<void(uint64_t)> m_navigateCb;
+    QListWidget *m_list = nullptr;
+    rd_Cpu const *m_cpu = nullptr;
+    int m_hexDigits = 4;
+};
+
+/* ======================================================================== */
 /* Debugger                                                                  */
 /* ======================================================================== */
 
@@ -1380,13 +1462,16 @@ Debugger::Debugger(QWidget *parent)
     vbox->setMenuBar(menuBar);
     buildMenuBar(menuBar);
 
-    /* Splitter: disasm left, registers right */
+    /* Splitter: disasm left, right panels right */
     auto *splitter = new QSplitter(Qt::Horizontal, container);
 
     auto *mw = qobject_cast<MainWindow *>(parentWidget());
     m_disasm = new DisasmView(mw, splitter);
 
-    auto *rightPanel = new QWidget(splitter);
+    /* Right side: horizontal splitter with regs + stack trace */
+    auto *rightSplitter = new QSplitter(Qt::Horizontal, splitter);
+
+    auto *rightPanel = new QWidget(rightSplitter);
     auto *rightLayout = new QVBoxLayout(rightPanel);
     rightLayout->setContentsMargins(4, 4, 4, 4);
 
@@ -1402,17 +1487,25 @@ Debugger::Debugger(QWidget *parent)
     scroll->setWidget(m_regs);
     rightLayout->addWidget(scroll);
 
+    m_stackTrace = new StackTracePane(
+        [this](uint64_t pc) { m_disasm->goToAddress(pc); },
+        rightSplitter);
+    m_stackTrace->hide();
+
+    rightSplitter->addWidget(rightPanel);
+    rightSplitter->addWidget(m_stackTrace);
+    rightSplitter->setSizes({200, 200});
+
     splitter->addWidget(m_disasm);
-    splitter->addWidget(rightPanel);
+    splitter->addWidget(rightSplitter);
     splitter->setStretchFactor(0, 1);
     splitter->setStretchFactor(1, 0);
 
     m_disasm->setMinimumWidth(300);
-    rightPanel->setFixedWidth(200);
 
     vbox->addWidget(splitter);
     setWidget(container);
-    resize(800, 500);
+    resize(1000, 500);
 }
 
 void Debugger::buildMenuBar(QMenuBar *menuBar) {
@@ -1470,10 +1563,12 @@ void Debugger::onCpuChanged(int index) {
     if (!sys || index < 0 || (unsigned)index >= sys->v1.num_cpus) {
         m_cpu = nullptr;
         m_regs->setCpu(nullptr);
+        m_stackTrace->setCpu(nullptr);
         return;
     }
     m_cpu = sys->v1.cpus[index];
     m_regs->setCpu(m_cpu);
+    m_stackTrace->setCpu(m_cpu);
 }
 
 void Debugger::goToAddress() {
@@ -1504,19 +1599,23 @@ void Debugger::refresh(bool paused) {
         m_cpuCombo->clear();
         m_cpu = nullptr;
         m_regs->setCpu(nullptr);
+        m_stackTrace->setCpu(nullptr);
         m_lastSystem = sys;
         if (sys) populateCpus();
     }
 
     m_disasm->refresh(m_cpu, paused);
-    if (paused)
+    if (paused) {
         m_regs->refresh();
+        m_stackTrace->refresh();
+    }
 }
 
 bool Debugger::event(QEvent *e) {
     if (e->type() == QEvent::WindowActivate && m_lastPaused && m_cpu) {
         m_disasm->refresh(m_cpu, true);
         m_regs->refresh();
+        m_stackTrace->refresh();
     }
     return QDockWidget::event(e);
 }
