@@ -17,7 +17,7 @@ namespace sys {
 
 /* Define to store every VRAM-modifying event as a full keyframe (no XOR diffs).
  * Useful for debugging capture/reconstruct issues at the cost of memory. */
-#define GPU_CAPTURE_ALL_KEYFRAMES
+// #define GPU_CAPTURE_ALL_KEYFRAMES
 
 static constexpr int VRAM_W     = 1024;   // halfwords per row
 static constexpr int VRAM_H     = 512;

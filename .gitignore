@@ -2,3 +2,4 @@ arret-sdl
 arret-qt
 build/
 *.log
+screenshot.png
